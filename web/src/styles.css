@@ -1,67 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 250 20% 99%;
-    --foreground: 222 47% 11%;
+    --background: 249 10% 98%;
+    --foreground: 222 84% 5%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 222 84% 5%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 222 84% 5%;
     --primary: 200 90% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 215 20% 96%;
+    --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
-    --muted: 215 20% 96%;
+    --muted: 210 40% 96%;
     --muted-foreground: 215 16% 47%;
-    --accent: 215 20% 96%;
+    --accent: 210 40% 96%;
     --accent-foreground: 222 47% 11%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
     --ring: 200 98% 39%;
-    --radius: 0.75rem;
+    --sidebar-bg: 222 84% 5%;
+    --sidebar-text: 210 40% 98%;
+    --sidebar-muted: 217 19% 55%;
   }
 
-  .dark {
-    --background: 224 71% 4%;
-    --foreground: 213 31% 91%;
-    --card: 222 47% 7%;
-    --card-foreground: 213 31% 91%;
-    --popover: 222 47% 7%;
-    --popover-foreground: 213 31% 91%;
-    --primary: 201 100% 47%;
-    --primary-foreground: 222 47% 7%;
-    --secondary: 222 47% 11%;
-    --secondary-foreground: 213 31% 91%;
-    --muted: 222 47% 11%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 222 47% 11%;
-    --accent-foreground: 213 31% 91%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 201 100% 47%;
+  body { 
+    @apply bg-gray-50 text-[hsl(var(--foreground))] font-medium antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
-
-  body { @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))]; }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))] shadow-sm;
+    @apply rounded-xl border border-gray-200 bg-white text-gray-900 shadow-sm;
   }
-  .metric {
-    @apply card p-6 transition-transform hover:-translate-y-0.5 hover:shadow-md;
+  
+  .metric-card {
+    @apply card p-6 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-brand-300;
+    min-height: 140px;
   }
+
+  .chart-card {
+    @apply card p-8 transition-all duration-200 hover:shadow-md hover:border-gray-300;
+  }
+  
   .btn {
-    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))];
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2;
   }
+  
   .btn-primary {
-    @apply btn bg-[hsl(var(--primary))] text-white hover:brightness-95;
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 shadow-sm;
   }
+  
   .btn-ghost {
-    @apply btn bg-transparent hover:bg-[hsl(var(--secondary))];
+    @apply btn bg-transparent hover:bg-gray-100 text-gray-700;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-400 rounded-lg transition-all duration-200 hover:bg-white/5 hover:text-gray-200;
+  }
+
+  .nav-item.active {
+    @apply bg-brand-600 text-white shadow-lg;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-success {
+    @apply status-badge bg-emerald-100 text-emerald-800;
+  }
+
+  .status-warning {
+    @apply status-badge bg-amber-100 text-amber-800;
+  }
+
+  .status-error {
+    @apply status-badge bg-red-100 text-red-800;
   }
 }
 

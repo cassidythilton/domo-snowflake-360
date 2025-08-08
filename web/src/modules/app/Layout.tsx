@@ -12,13 +12,21 @@ export function Layout({
   aside: ReactNode
 }) {
   return (
-    <div className="grid h-screen grid-cols-[260px_1fr_340px] grid-rows-[auto_1fr]">
-      <aside className="row-span-2 border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+    <div className="flex h-screen bg-gray-50">
+      <aside className="w-64 bg-gray-900 text-white flex flex-col">
         {sidebar}
       </aside>
-      <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">{header}</header>
-      <main className="overflow-auto p-6">{content}</main>
-      <aside className="border-l border-[hsl(var(--border))] bg-[hsl(var(--card))]">{aside}</aside>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="bg-white border-b border-gray-200 px-8 py-6">
+          {header}
+        </header>
+        <main className="flex-1 overflow-auto bg-gray-50 p-8">
+          {content}
+        </main>
+      </div>
+      <aside className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto">
+        {aside}
+      </aside>
     </div>
   )
 }

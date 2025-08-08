@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Layout } from './Layout'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { AlertsSidebar } from './AlertsSidebar'
 import { CostTab } from './tabs/CostTab'
 import { PerformanceTab } from './tabs/PerformanceTab'
 import { PipelineTab } from './tabs/PipelineTab'
@@ -44,7 +45,7 @@ export function App() {
           <OptimizationTab />
         )
       }
-      aside={<div className="p-6">Alerts & Recommendations (WIP)</div>}
+      aside={<AlertsSidebar />}
     />
   )
 }
