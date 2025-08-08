@@ -10,16 +10,17 @@
   },
   "dependencies": {
     "@radix-ui/react-tabs": "^1.0.5",
-    "apexcharts": "^3.49.0",
+    "apexcharts": "^4.0.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.452.0",
     "react": "^18.3.1",
-    "react-apexcharts": "^1.4.1",
+    "react-apexcharts": "^1.7.0",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
+    "@types/node": "^24.2.1",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react-swc": "^3.7.0",
@@ -31,4 +32,3 @@
     "vite": "^5.4.3"
   }
 }
-
