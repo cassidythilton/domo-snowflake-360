@@ -5,6 +5,9 @@ class SnowDomoDashboard {
         this.isLiveMode = false;
         this.isDarkMode = false;
         this.currentDateRange = 30;
+        this.currentWarehouse = '';
+        this.currentDatabase = '';
+        this.currentSchema = '';
         this.charts = {};
         this.data = {};
         this.alerts = [];
@@ -35,7 +38,14 @@ class SnowDomoDashboard {
             'OBS_CREDITS_BY_WAREHOUSE': 'OBSCREDITSBYWAREHOUSE',
             'OBS_COST_PER_CREDIT': 'OBSCOSTPERCREDIT',
             'OBS_QUERY_HISTORY_LTD': 'OBSQUERYHISTORYLTD',
-            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS'
+            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS',
+            'OBS_PIPELINE_THROUGHPUT': 'OBSPIPELINETHROUGHPUT',
+            'OBS_RECORD_FRESHNESS': 'OBSRECORDFRESHNESS',
+            'OBS_DATA_COVERAGE': 'OBSDATACOVERAGE',
+            'OBS_DATA_COMPLETENESS': 'OBSDATACOMPLETENESS',
+            'OBS_DATA_ACCURACY': 'OBSDATAACCURACY',
+            'OBS_DATA_CONSISTENCY': 'OBSDATACONSISTENCY',
+            'OBS_SCHEMA_DRIFT': 'OBSSCHEMADRIFT'
         };
 
         this.init();
@@ -171,6 +181,22 @@ class SnowDomoDashboard {
             this.refreshData();
         });
 
+        // Global filter changes
+        document.getElementById('warehouseFilter').addEventListener('change', (e) => {
+            this.currentWarehouse = e.target.value;
+            this.refreshData();
+        });
+
+        document.getElementById('databaseFilter').addEventListener('change', (e) => {
+            this.currentDatabase = e.target.value;
+            this.refreshData();
+        });
+
+        document.getElementById('schemaFilter').addEventListener('change', (e) => {
+            this.currentSchema = e.target.value;
+            this.refreshData();
+        });
+
         // Refresh button
         document.getElementById('refreshBtn').addEventListener('click', () => {
             this.refreshData();
@@ -227,55 +253,12 @@ class SnowDomoDashboard {
     generateMockData() {
         const endDate = new Date();
         const startDate = new Date(endDate.getTime() - (this.currentDateRange * 24 * 60 * 60 * 1000));
+
         // Generate date array
         const dates = [];
         for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
             dates.push(new Date(d));
         }
-
-        // Data Quality mock datasets
-        // Coverage anomalies (ROWS_LOADED with z-score)
-        this.data.dataCoverage = [];
-        const dqDatasets = ['USER_ACTIVITY', 'SALES_DATA', 'MARKETING_EVENTS'];
-        dates.forEach(date => {
-            dqDatasets.forEach(ds => {
-                const avg = 20000 + Math.random() * 50000;
-                const z = (Math.random() - 0.5) * 6;
-                const rows = Math.max(0, Math.round(avg + z * avg * 0.25));
-                this.data.dataCoverage.push({ RUN_DATE: date, DATASET: ds, ROWS_LOADED: rows, AVG_ROWS_30D: Math.round(avg), ZSCORE_ROWS_LOADED: z });
-            });
-        });
-
-        // Completeness (NULL_PCT_* and DUP_PK_COUNT)
-        this.data.dataCompleteness = dqDatasets.map(ds => {
-            const base = { AS_OF_DATE: new Date(), DATASET: ds, ROW_COUNT: Math.floor(Math.random()*100000)+5000, DUP_PK_COUNT: Math.random()<0.3?Math.floor(Math.random()*50):0 };
-            ['EMAIL','PHONE','ADDRESS','CUSTOMER_ID','ORDER_DATE'].forEach(col => base[`NULL_PCT_${col}`] = +(Math.random()*15).toFixed(1));
-            return base;
-        });
-
-        // Accuracy (rule violations over days)
-        this.data.dataAccuracy = [];
-        const rules = ['EMAIL_FORMAT','PHONE_LENGTH','POSITIVE_AMOUNT','FUTURE_DATE','VALID_STATUS'];
-        dates.forEach(date => {
-            rules.forEach(rule => {
-                this.data.dataAccuracy.push({ RUN_TS: date, RULE_ID: rule, TABLE_FQN: 'DB.SCHEMA.TABLE', RULE_DESC: rule, VIOLATIONS: Math.floor(Math.random()*100) });
-            });
-        });
-
-        // Consistency (orphan rows by check)
-        this.data.dataConsistency = ['FK_CUSTOMERS_ORDERS','FK_ORDERS_PRODUCTS','FK_USERS_ADDRESSES','FK_PRODUCTS_CATEGORIES','FK_ORDERS_PAYMENTS']
-            .map(name => ({ AS_OF_DATE: new Date(), CHECK_NAME: name, ORPHAN_ROWS: Math.floor(Math.random()*500) }));
-
-        // Schema drift (latest 50 changes)
-        this.data.schemaDrift = Array.from({length:50}).map(() => ({
-            CHANGE_DATE: new Date(Date.now()-Math.floor(Math.random()*30)*86400000),
-            CHANGE_TYPE: ['ADDED','REMOVED','MODIFIED'][Math.floor(Math.random()*3)],
-            TABLE_CATALOG: 'PRODUCTION',
-            TABLE_SCHEMA: ['SALES','MARKETING','FINANCE','OPERATIONS'][Math.floor(Math.random()*4)],
-            TABLE_NAME: ['CUSTOMERS','ORDERS','PRODUCTS','TRANSACTIONS','USERS'][Math.floor(Math.random()*5)],
-            COLUMN_NAME: ['EMAIL','PHONE','ADDRESS','CREATED_AT','UPDATED_AT','STATUS','AMOUNT'][Math.floor(Math.random()*7)],
-            DATA_TYPE: ['VARCHAR(255)','INTEGER','TIMESTAMP','BOOLEAN','DECIMAL(10,2)'][Math.floor(Math.random()*5)]
-        })).sort((a,b) => b.CHANGE_DATE - a.CHANGE_DATE);
 
         // OBS_COST_PER_CREDIT
         this.data.costPerCredit = [];
@@ -287,18 +270,6 @@ class SnowDomoDashboard {
                     CREDITS: Math.random() * 50 + 10,
                     SPEND_USD: Math.random() * 50 + 10
                 });
-            });
-        });
-
-        // Minimal successful rows throughput to power Cost/Row efficiency
-        // Create a synthetic successful rows series aligned by date
-        this.data.successfulRows = [];
-        dates.forEach(date => {
-            // Simulate some days with no loads to respect the requirement to ignore zero-row days
-            const rowsLoaded = Math.random() > 0.15 ? Math.floor(Math.random() * 900000 + 10000) : 0;
-            this.data.successfulRows.push({
-                RUN_DATE: date,
-                ROWS_LOADED: rowsLoaded
             });
         });
 
@@ -388,28 +359,6 @@ class SnowDomoDashboard {
             { DATASET: 'rootCauseRecord', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 400) }
         ];
 
-        // OBS_RECORD_FRESHNESS (per-day source → warehouse lag by dataset)
-        const freshnessDatasets = this.data.dataFreshness.map(d => d.DATASET);
-        this.data.recordFreshness = [];
-        dates.forEach(date => {
-            freshnessDatasets.forEach(ds => {
-                const hoursBehind = Math.max(0, Math.round(Math.random() * 72));
-                const sourceTs = new Date(date.getTime() - hoursBehind * 60 * 60 * 1000);
-                this.data.recordFreshness.push({
-                    DATASET: ds,
-                    AS_OF_DATE: date,
-                    MAX_SOURCE_TS: sourceTs,
-                    HOURS_BEHIND_NOW: hoursBehind
-                });
-            });
-        });
-
-        // Flatten dataFreshness into domoDataFreshness for delta compare
-        this.data.domoDataFreshness = this.data.dataFreshness.map(d => ({
-            DATASET: d.DATASET,
-            HOURS_SINCE_LAST_RUN: d.HOURS_SINCE_LAST_RUN
-        }));
-
         // OBS_DATASET_CREDIT_COST
         this.data.datasetCreditCost = [
             { DATASET_NAME: 'HHS_NPI_Registry', CREDITS: 0.00718, COST_USD: 0.00718 },
@@ -443,31 +392,20 @@ class SnowDomoDashboard {
             ZSCORE: (Math.random() - 0.5) * 6
         }));
 
-        // OBS_DOMO_CONNECTOR_RUNS (with derived metrics for slowest runs table)
+        // OBS_DOMO_CONNECTOR_RUNS
         this.data.connectorRuns = [];
         dates.forEach(date => {
             connectors.forEach(connector => {
                 const runsCount = Math.floor(Math.random() * 5) + 1;
                 for (let i = 0; i < runsCount; i++) {
-                    const hh = Math.floor(Math.random() * 1); // keep under an hour for realism
-                    const mm = Math.floor(Math.random() * 59);
-                    const ss = Math.floor(Math.random() * 59);
-                    const runTime = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-                    const totalSeconds = hh * 3600 + mm * 60 + ss || Math.floor(Math.random() * 300) + 60;
-                    const updatedRows = Math.floor(Math.random() * 20000) + 200;
-                    const bytesInserted = Math.floor(Math.random() * 5_000_000) + 50_000;
                     this.data.connectorRuns.push({
                         'Data Source Name': connector,
                         Status: Math.random() > 0.05 ? 'SUCCESS' : 'FAILURE',
-                        'Updated Rows': updatedRows,
-                        'Bytes Inserted': bytesInserted,
+                        'Updated Rows': Math.floor(Math.random() * 10000) + 100,
+                        'Bytes Inserted': Math.floor(Math.random() * 1000000) + 10000,
                         'Total API Calls': Math.floor(Math.random() * 50) + 5,
                         'Created At': date,
-                        'Run Time': runTime,
-                        'Run Time Seconds': totalSeconds,
-                        'Rows Per Second': +(updatedRows / totalSeconds).toFixed(2),
-                        'Bytes Per Second': +(bytesInserted / totalSeconds).toFixed(2),
-                        'Start Time': new Date(date.getTime() - totalSeconds * 1000)
+                        'Run Time': `00:0${Math.floor(Math.random() * 6)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`
                     });
                 }
             });
@@ -520,6 +458,197 @@ class SnowDomoDashboard {
 
         // Sort by elapsed time for better visualization
         this.data.queryHistory.sort((a, b) => b.TOTAL_ELAPSED_TIME - a.TOTAL_ELAPSED_TIME);
+
+        // OBS_PIPELINE_THROUGHPUT - for Throughput Trend Evolution
+        this.data.pipelineThroughput = [];
+        const datasets = ['USER_ACTIVITY', 'SALES_DATA', 'MARKETING_EVENTS', 'PRODUCT_CATALOG', 'CUSTOMER_SUPPORT'];
+        dates.forEach(date => {
+            datasets.forEach(dataset => {
+                if (Math.random() > 0.2) { // Not all datasets run every day
+                    this.data.pipelineThroughput.push({
+                        RUN_DATE: date,
+                        DATASET: dataset,
+                        ROWS_PER_SEC: Math.random() * 1000 + 100,
+                        BYTES_PER_SEC: Math.random() * 10000000 + 1000000,
+                        ROWS_LOADED: Math.floor(Math.random() * 1000000) + 10000
+                    });
+                }
+            });
+        });
+
+        // OBS_RECORD_FRESHNESS - for E2E Latency Heatmap
+        this.data.recordFreshness = [];
+        dates.forEach(date => {
+            datasets.forEach(dataset => {
+                const maxSourceTs = new Date(date.getTime() - Math.random() * 24 * 60 * 60 * 1000);
+                const hoursBehind = Math.random() * 72; // 0-72 hours behind
+                this.data.recordFreshness.push({
+                    DATASET: dataset,
+                    MAX_SOURCE_TS: maxSourceTs,
+                    HOURS_BEHIND_NOW: hoursBehind,
+                    AS_OF_DATE: date
+                });
+            });
+        });
+
+        // Enhanced OBS_DOMO_CONNECTOR_RUNS with more realistic data for slowest runs table
+        this.data.connectorRuns.forEach(run => {
+            // Convert Run Time to seconds for easier processing
+            const timeParts = run['Run Time'].split(':');
+            const totalSeconds = parseInt(timeParts[0]) * 3600 + parseInt(timeParts[1]) * 60 + parseInt(timeParts[2]);
+            run['Run Time Seconds'] = totalSeconds;
+            
+            // Calculate derived metrics
+            if (run['Updated Rows'] > 0 && totalSeconds > 0) {
+                run['Rows Per Second'] = Math.round(run['Updated Rows'] / totalSeconds * 100) / 100;
+                run['Bytes Per Second'] = Math.round(run['Bytes Inserted'] / totalSeconds * 100) / 100;
+            } else {
+                run['Rows Per Second'] = 0;
+                run['Bytes Per Second'] = 0;
+            }
+            
+            // Add start time
+            const startTime = new Date(run['Created At']);
+            startTime.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
+            run['Start Time'] = startTime;
+        });
+
+        // Generate OBS_DOMO_DATA_FRESHNESS data for delta calculation
+        this.data.domoDataFreshness = [];
+        datasets.forEach(dataset => {
+            this.data.domoDataFreshness.push({
+                DATASET: dataset,
+                HOURS_SINCE_LAST_RUN: Math.random() * 48 // 0-48 hours since last run
+            });
+        });
+
+        // Generate OBS_DATA_COVERAGE data for coverage anomalies
+        this.data.dataCoverage = [];
+        dates.forEach(date => {
+            datasets.forEach(dataset => {
+                const avgRows30d = 10000 + Math.random() * 50000;
+                const deviation = (Math.random() - 0.5) * 6; // -3 to +3 z-score range
+                const rowsLoaded = Math.max(0, avgRows30d + (deviation * avgRows30d * 0.3));
+                
+                this.data.dataCoverage.push({
+                    RUN_DATE: date,
+                    DATASET: dataset,
+                    ROWS_LOADED: Math.round(rowsLoaded),
+                    AVG_ROWS_30D: Math.round(avgRows30d),
+                    ZSCORE_ROWS_LOADED: deviation
+                });
+            });
+        });
+
+        // Generate OBS_DATA_COMPLETENESS data for null rates and duplicates
+        this.data.dataCompleteness = [];
+        datasets.forEach(dataset => {
+            const rowCount = 10000 + Math.random() * 100000;
+            const dupPkCount = Math.random() < 0.3 ? Math.floor(Math.random() * 50) : 0;
+            
+            // Add base record
+            const baseRecord = {
+                AS_OF_DATE: new Date(),
+                DATASET: dataset,
+                ROW_COUNT: Math.round(rowCount),
+                DUP_PK_COUNT: dupPkCount
+            };
+            
+            // Add null percentages for various columns
+            const columns = ['EMAIL', 'PHONE', 'ADDRESS', 'CUSTOMER_ID', 'ORDER_DATE'];
+            columns.forEach(col => {
+                baseRecord[`NULL_PCT_${col}`] = Math.random() * 15; // 0-15% null rate
+            });
+            
+            this.data.dataCompleteness.push(baseRecord);
+        });
+
+        // Generate OBS_DATA_ACCURACY data for rule violations
+        this.data.dataAccuracy = [];
+        const rules = [
+            { RULE_ID: 'EMAIL_FORMAT', RULE_DESC: 'Email must follow valid format', TABLE_FQN: 'DB.SCHEMA.CUSTOMERS' },
+            { RULE_ID: 'PHONE_LENGTH', RULE_DESC: 'Phone number must be 10 digits', TABLE_FQN: 'DB.SCHEMA.CUSTOMERS' },
+            { RULE_ID: 'POSITIVE_AMOUNT', RULE_DESC: 'Order amount must be positive', TABLE_FQN: 'DB.SCHEMA.ORDERS' },
+            { RULE_ID: 'FUTURE_DATE', RULE_DESC: 'Order date cannot be in future', TABLE_FQN: 'DB.SCHEMA.ORDERS' },
+            { RULE_ID: 'VALID_STATUS', RULE_DESC: 'Status must be valid enum value', TABLE_FQN: 'DB.SCHEMA.PRODUCTS' }
+        ];
+        
+        dates.forEach(date => {
+            rules.forEach(rule => {
+                this.data.dataAccuracy.push({
+                    RUN_TS: date,
+                    RULE_ID: rule.RULE_ID,
+                    TABLE_FQN: rule.TABLE_FQN,
+                    RULE_DESC: rule.RULE_DESC,
+                    VIOLATIONS: Math.floor(Math.random() * 100) // 0-99 violations
+                });
+            });
+        });
+
+        // Generate OBS_DATA_CONSISTENCY data for orphan rates
+        this.data.dataConsistency = [];
+        const consistencyChecks = [
+            'FK_CUSTOMERS_ORDERS',
+            'FK_ORDERS_PRODUCTS', 
+            'FK_USERS_ADDRESSES',
+            'FK_PRODUCTS_CATEGORIES',
+            'FK_ORDERS_PAYMENTS',
+            'FK_CUSTOMERS_PREFERENCES',
+            'FK_INVENTORY_PRODUCTS',
+            'FK_REVIEWS_PRODUCTS',
+            'FK_SHIPMENTS_ORDERS',
+            'FK_DISCOUNTS_PRODUCTS'
+        ];
+        
+        consistencyChecks.forEach(checkName => {
+            this.data.dataConsistency.push({
+                AS_OF_DATE: new Date(),
+                CHECK_NAME: checkName,
+                ORPHAN_ROWS: Math.floor(Math.random() * 500) // 0-499 orphan rows
+            });
+        });
+
+        // Generate OBS_SCHEMA_DRIFT data for schema changes
+        this.data.schemaDrift = [];
+        const changeTypes = ['ADDED', 'REMOVED', 'MODIFIED'];
+        const schemas = ['SALES', 'MARKETING', 'FINANCE', 'OPERATIONS'];
+        const tables = ['CUSTOMERS', 'ORDERS', 'PRODUCTS', 'TRANSACTIONS', 'USERS'];
+        const columns = ['EMAIL', 'PHONE', 'ADDRESS', 'CREATED_AT', 'UPDATED_AT', 'STATUS', 'AMOUNT'];
+        
+        // Generate 50 recent schema changes
+        for (let i = 0; i < 50; i++) {
+            const changeDate = new Date();
+            changeDate.setDate(changeDate.getDate() - Math.floor(Math.random() * 30)); // Last 30 days
+            
+            this.data.schemaDrift.push({
+                CHANGE_DATE: changeDate,
+                CHANGE_TYPE: changeTypes[Math.floor(Math.random() * changeTypes.length)],
+                TABLE_CATALOG: 'PRODUCTION',
+                TABLE_SCHEMA: schemas[Math.floor(Math.random() * schemas.length)],
+                TABLE_NAME: tables[Math.floor(Math.random() * tables.length)],
+                COLUMN_NAME: columns[Math.floor(Math.random() * columns.length)],
+                DATA_TYPE: ['VARCHAR(255)', 'INTEGER', 'TIMESTAMP', 'BOOLEAN', 'DECIMAL(10,2)'][Math.floor(Math.random() * 5)]
+            });
+        });
+
+        // Sort schema drift by date (newest first)
+        this.data.schemaDrift.sort((a, b) => b.CHANGE_DATE - a.CHANGE_DATE);
+
+        // Generate OBS_COST_PER_CREDIT data for cost efficiency
+        this.data.costPerCredit = this.data.costPerCredit || []; // Use existing if available
+        
+        // Ensure we have cost data aligned with dates for cost per row calculation
+        if (!this.data.costPerCredit.length) {
+            dates.forEach(date => {
+                ['WAREHOUSE', 'COMPUTE', 'STORAGE', 'DATA_TRANSFER'].forEach(serviceType => {
+                    this.data.costPerCredit.push({
+                        USAGE_DATE: date,
+                        SERVICE_TYPE: serviceType,
+                        SPEND_USD: Math.random() * 1000 + 100 // $100-$1100 per day per service
+                    });
+                });
+            });
+        }
     }
 
     generateQueryRewriteData() {
@@ -873,13 +1002,13 @@ ORDER BY total_users DESC`,
                 title: 'Adoption & Utilization',
                 description: 'Analyze user engagement and platform adoption'
             },
+            'quality': {
+                title: 'Data Quality',
+                description: 'Monitor data completeness, accuracy, and consistency'
+            },
             'optimization': {
                 title: 'AI Query Optimization',
                 description: 'Leverage Claude 4 Sonnet to optimize query performance and reduce costs'
-            },
-            'quality': {
-                title: 'Data Quality',
-                description: 'Monitor data completeness, accuracy, and consistency across pipelines'
             }
         };
 
@@ -1388,26 +1517,69 @@ ORDER BY total_users DESC`,
     }
 
     renderTabCharts(tabName) {
-        switch(tabName) {
-            case 'cost':
-                this.renderCostCharts();
-                break;
-            case 'performance':
-                this.renderPerformanceCharts();
-                break;
-            case 'pipeline':
-                this.renderPipelineCharts();
-                break;
-            case 'adoption':
-                this.renderAdoptionCharts();
-                break;
-            case 'quality':
-                this.renderQualityCharts();
-                break;
-            case 'optimization':
-                this.renderOptimizationCharts();
-                break;
-        }
+        console.log('Rendering charts for tab:', tabName);
+        
+        // Destroy existing charts first to avoid conflicts
+        this.destroyChartsForTab(tabName);
+        
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+            try {
+                switch(tabName) {
+                    case 'cost':
+                        console.log('Rendering cost charts');
+                        this.renderCostCharts();
+                        break;
+                    case 'performance':
+                        console.log('Rendering performance charts');
+                        this.renderPerformanceCharts();
+                        break;
+                    case 'pipeline':
+                        console.log('Rendering pipeline charts');
+                        this.renderPipelineCharts();
+                        break;
+                    case 'adoption':
+                        console.log('Rendering adoption charts');
+                        this.renderAdoptionCharts();
+                        break;
+                    case 'quality':
+                        console.log('Rendering quality charts');
+                        this.renderQualityCharts();
+                        break;
+                    case 'optimization':
+                        console.log('Rendering optimization charts');
+                        this.renderOptimizationCharts();
+                        break;
+                    default:
+                        console.warn('Unknown tab:', tabName);
+                }
+            } catch (error) {
+                console.error('Error rendering charts for tab', tabName, ':', error);
+            }
+        }, 100);
+    }
+
+    destroyChartsForTab(tabName) {
+        // Destroy existing charts to avoid memory leaks and conflicts
+        const chartMappings = {
+            'cost': ['creditsChart', 'warehouseTreemap', 'utilizationChart'],
+            'performance': ['queryPerformanceChart', 'failureRateChart', 'warehouseEventsChart', 'throughputTrend'],
+            'pipeline': ['bytesApiChart', 'connectorSuccessChart', 'slaHeatmapChart', 'e2eLatencyHeatmap'],
+            'adoption': ['wauTrendChart', 'creditsUsersChart', 'datasetCostChart', 'topConnectorsChart'],
+            'optimization': ['improvementDistributionChart', 'actionBreakdownChart', 'savingsOverTimeChart']
+        };
+        
+        const charts = chartMappings[tabName] || [];
+        charts.forEach(chartName => {
+            if (this.charts[chartName]) {
+                try {
+                    this.charts[chartName].destroy();
+                    delete this.charts[chartName];
+                } catch (error) {
+                    console.warn('Error destroying chart', chartName, ':', error);
+                }
+            }
+        });
     }
 
     renderOptimizationCharts() {
@@ -1708,90 +1880,9 @@ ORDER BY total_users DESC`,
 
         // Dataset Cost Table
         this.renderDatasetCostTable();
-
-        // Cost per Successful Row (Efficiency)
-        // Ensure this chart renders alongside other Cost & Credits visuals
+        
+        // Cost per Row Chart
         this.renderCostPerRowLine();
-    }
-
-    // Cost efficiency = total spend / total successful rows, by day
-    renderCostPerRowLine() {
-        try {
-            const costsByDate = {};
-            (this.data.costPerCredit || []).forEach(item => {
-                const key = new Date(item.USAGE_DATE).toISOString().split('T')[0];
-                costsByDate[key] = (costsByDate[key] || 0) + (item.SPEND_USD || 0);
-            });
-
-            const rowsByDate = {};
-            (this.data.successfulRows || []).forEach(item => {
-                const key = new Date(item.RUN_DATE).toISOString().split('T')[0];
-                rowsByDate[key] = (rowsByDate[key] || 0) + (item.ROWS_LOADED || 0);
-            });
-
-            const allDates = Array.from(new Set([
-                ...Object.keys(costsByDate),
-                ...Object.keys(rowsByDate)
-            ])).sort();
-
-            const seriesData = allDates
-                .filter(d => rowsByDate[d] > 0)
-                .map(d => ({
-                    x: d,
-                    y: costsByDate[d] / rowsByDate[d],
-                    cost: costsByDate[d] || 0,
-                    rows: rowsByDate[d] || 0
-                }));
-
-            // Guard: if we still have no points, show friendly empty state
-            if (!seriesData.length) {
-                const el = document.querySelector('#costPerRowLine');
-                if (el) {
-                    el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost/row data for the selected period</div>';
-                }
-                return;
-            }
-
-            const chart = new ApexCharts(document.querySelector('#costPerRowLine'), {
-                series: [{ name: 'Cost per Row ($)', data: seriesData }],
-                chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
-                stroke: { curve: 'smooth', width: 3 },
-                markers: { size: 4 },
-                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-                yaxis: {
-                    title: { text: 'Cost per Row ($)', style: { color: '#6b7280' } },
-                    labels: { style: { colors: '#6b7280', fontSize: '12px' }, formatter: v => '$' + (v ?? 0).toFixed(4) }
-                },
-                colors: ['#259EDC'],
-                fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.7, opacityTo: 0.9, stops: [0, 90, 100] } },
-                dataLabels: { enabled: false },
-                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-                legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } },
-                tooltip: {
-                    custom: ({ dataPointIndex }) => {
-                        const d = seriesData[dataPointIndex];
-                        if (!d) return '';
-                        return `\
-<div class="p-3">\
-  <div class="font-medium">${new Date(d.x).toLocaleDateString()}</div>\
-  <div class="text-sm text-gray-600 mt-1">\
-    Total Cost: $${(d.cost || 0).toLocaleString()}<br/>\
-    Total Rows: ${(d.rows || 0).toLocaleString()}<br/>\
-    Cost per Row: $${(d.y || 0).toFixed(4)}\
-  </div>\
-</div>`;
-                    }
-                }
-            });
-            chart.render();
-            this.charts.costPerRowLine = chart;
-        } catch (err) {
-            console.error('Error rendering Cost per Row chart:', err);
-            const el = document.querySelector('#costPerRowLine');
-            if (el) {
-                el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Error rendering chart</div>';
-            }
-        }
     }
 
     renderPerformanceCharts() {
@@ -1823,25 +1914,60 @@ ORDER BY total_users DESC`,
             },
             dataLabels: { enabled: false },
             grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-            yaxis: { title: { text: 'Seconds', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-            annotations: { yaxis: [{ y: 1.0, borderColor: '#f59e0b', borderWidth: 2, strokeDashArray: 5, label: { text: 'SLA Threshold (1.0s)', style: { color: '#259EDC', background: '#fef3c7' } } }] }
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                title: { text: 'Seconds', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            annotations: {
+                yaxis: [{
+                    y: 1.0,
+                    borderColor: '#f59e0b',
+                    borderWidth: 2,
+                    strokeDashArray: 5,
+                    label: { 
+                        text: 'SLA Threshold (1.0s)', 
+                        style: { color: '#259EDC', background: '#fef3c7' }
+                    }
+                }]
+            }
         });
         this.charts.queryPerformanceChart.render();
 
-        // Throughput Trend Evolution (Rows/sec & Bytes/sec)
-        this.renderThroughputTrendChart();
-
         // Query Failure Rate Trend
         this.charts.failureRateChart = new ApexCharts(document.querySelector("#failureRateChart"), {
-            series: [{ name: 'Failure Rate %', data: this.data.queryFailureRate.map(item => ({ x: item.USAGE_DATE, y: (item.FAILURE_RATE * 100).toFixed(2) })) }],
-            chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
+            series: [{
+                name: 'Failure Rate %',
+                data: this.data.queryFailureRate.map(item => ({
+                    x: item.USAGE_DATE,
+                    y: (item.FAILURE_RATE * 100).toFixed(2)
+                }))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
             colors: ['#A62A92'],
-            plotOptions: { bar: { borderRadius: 4, dataLabels: { position: 'top' } } },
+            plotOptions: {
+                bar: {
+                    borderRadius: 4,
+                    dataLabels: { position: 'top' }
+                }
+            },
             dataLabels: { enabled: false },
             grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-            yaxis: { title: { text: 'Failure Rate (%)', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '12px' } } }
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                title: { text: 'Failure Rate (%)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }
         });
         this.charts.failureRateChart.render();
 
@@ -1849,229 +1975,38 @@ ORDER BY total_users DESC`,
         const eventData = this.processWarehouseEvents();
         this.charts.warehouseEventsChart = new ApexCharts(document.querySelector("#warehouseEventsChart"), {
             series: eventData.series,
-            chart: { type: 'scatter', height: 320, fontFamily: 'Inter, sans-serif' },
-            markers: { size: 3 },
-            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-            yaxis: { categories: eventData.warehouses, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
+            chart: { 
+                type: 'scatter', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            markers: {
+                size: 3 // smaller dots (default is 5)
+            },
+            xaxis: { 
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: { 
+                categories: eventData.warehouses,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
             colors: ['#A62A92', '#A07AC0', '#99CCEE'],
             grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-            legend: { position: 'top', labels: { colors: '#374151' } }
+            legend: { 
+                position: 'top',
+                labels: { colors: '#374151' }
+            }
         });
+
         this.charts.warehouseEventsChart.render();
 
-        // Query Performance Bee Swarm Chart
-        this.renderQuerySwarmChart();
-
-        // Top Slowest Connector Runs Table
-        try {
-            const slowestRuns = (this.data.connectorRuns || [])
-                .filter(run => run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
-                .sort((a, b) => b['Run Time Seconds'] - a['Run Time Seconds'])
-                .slice(0, 15);
-            const container = document.getElementById('slowRunsTable');
-            if (!container) return;
-            let html = `
-                <div class=\"overflow-auto h-full\">\n                  <table class=\"min-w-full\">\n                    <thead class=\"bg-gray-50 sticky top-0\">\n                      <tr>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Dataset</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Run Start</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Run Time (s)</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Rows/sec</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Bytes/sec</th>\n                      </tr>\n                    </thead>\n                    <tbody class=\"bg-white divide-y divide-gray-200\">`;
-            slowestRuns.forEach(run => {
-                html += `\n                  <tr class=\"hover:bg-gray-50\">\n                    <td class=\"px-3 py-2 text-sm text-gray-900\">${run['Data Source Name']}</td>\n                    <td class=\"px-3 py-2 text-sm text-gray-500\">${new Date(run['Start Time']).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Run Time Seconds']||0).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Rows Per Second']||0).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Bytes Per Second']||0).toLocaleString()}</td>\n                  </tr>`;
-            });
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-        } catch (e) {
-            console.error('Error rendering slow runs table:', e);
-            const container = document.getElementById('slowRunsTable');
-            if (container) container.innerHTML = '<div class=\"h-full flex items-center justify-center text-gray-500\">Table unavailable</div>';
-        }
-    }
-    renderQualityCharts() {
-        try { this.renderCoverageAnomaliesChart(); } catch(e){ console.error(e); }
-        try { this.renderNullsAndDupesTable(); } catch(e){ console.error(e); }
-        try { this.renderOrphanRateBar(); } catch(e){ console.error(e); }
-        try { this.renderSchemaDriftLog(); } catch(e){ console.error(e); }
-    }
-
-    renderCoverageAnomaliesChart() {
-        const container = document.querySelector('#coverageAnomaliesChart');
-        if (!container) return;
-        const byDataset = {};
-        (this.data.dataCoverage || []).forEach(r => {
-            (byDataset[r.DATASET] ||= []).push({ x: r.RUN_DATE, y: r.ROWS_LOADED, z: r.ZSCORE_ROWS_LOADED, avg: r.AVG_ROWS_30D });
-        });
-        const datasets = Object.keys(byDataset).slice(0,3);
-        const series = datasets.map(ds => ({ name: ds, type: 'line', data: byDataset[ds].map(p => ({ x: p.x, y: p.y })) }));
-        const anomalies = (this.data.dataCoverage || []).filter(r => Math.abs(r.ZSCORE_ROWS_LOADED) >= 2).map(a => ({ x: a.RUN_DATE, y: a.ROWS_LOADED }));
-        series.push({ name: 'Anomalies', type: 'scatter', data: anomalies });
-        const chart = new ApexCharts(container, {
-            series,
-            chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
-            stroke: { width: [2,2,2,0], curve: 'smooth' },
-            markers: { size: [0,0,0,6] },
-            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-            yaxis: { title: { text: 'Rows Loaded', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-            colors: ['#259EDC', '#56CCF2', '#A62A92', '#ef4444'],
-            dataLabels: { enabled: false },
-            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-            legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } }
-        });
-        chart.render();
-        this.charts.coverageAnomaliesChart = chart;
-    }
-
-    renderNullsAndDupesTable() {
-        const container = document.getElementById('nullsAndDupesTable');
-        if (!container) return;
-        const issues = [];
-        (this.data.dataCompleteness || []).forEach(item => {
-            if (item.DUP_PK_COUNT > 0) issues.push({ column: 'PRIMARY_KEY', dataset: item.DATASET, issue: 'Duplicates', value: item.DUP_PK_COUNT, rowCount: item.ROW_COUNT, severity: item.DUP_PK_COUNT>10?'high':'medium' });
-            Object.keys(item).forEach(k => {
-                if (k.startsWith('NULL_PCT_') && item[k] > 5) issues.push({ column: k.replace('NULL_PCT_',''), dataset: item.DATASET, issue: 'High Null Rate', value: item[k], rowCount: item.ROW_COUNT, severity: item[k]>10?'high':'medium' });
-            });
-        });
-        const top15 = issues.sort((a,b) => (a.severity==='high'?1:0) < (b.severity==='high'?1:0) ? 1 : (b.value - a.value)).slice(0,15);
-        let html = `
-          <div class="overflow-x-auto"><table class="min-w-full"><thead><tr class="border-b border-gray-200">
-            <th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>
-            <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
-            <th class="text-left py-3 px-4 font-semibold text-gray-900">Issue</th>
-            <th class="text-left py-3 px-4 font-semibold text-gray-900">Value</th>
-            <th class="text-left py-3 px-4 font-semibold text-gray-900">Row Count</th>
-          </tr></thead><tbody class="divide-y divide-gray-100">`;
-        top15.forEach(i => {
-            const badge = i.severity==='high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
-            const val = i.issue==='Duplicates' ? i.value : `${i.value.toFixed(1)}%`;
-            html += `<tr class="hover:bg-gray-50"><td class="py-3 px-4 text-sm text-gray-900">${i.column}</td>
-              <td class="py-3 px-4 text-sm text-gray-900">${i.dataset}</td>
-              <td class="py-3 px-4 text-sm"><span class="px-2 py-1 text-xs rounded-full ${badge}">${i.issue}</span></td>
-              <td class="py-3 px-4 text-sm font-mono text-gray-900">${val}</td>
-              <td class="py-3 px-4 text-sm font-mono text-gray-500">${i.rowCount.toLocaleString()}</td></tr>`;
-        });
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
-    }
-
-
-
-    renderOrphanRateBar() {
-        const container = document.getElementById('orphanRateBar');
-        if (!container) return;
-        const top = (this.data.dataConsistency || []).sort((a,b)=>b.ORPHAN_ROWS - a.ORPHAN_ROWS).slice(0,10);
-        const chart = new ApexCharts(container, {
-            series: [{ name: 'Orphan Rows', data: top.map(i => ({ x: i.CHECK_NAME.replace('FK_',''), y: i.ORPHAN_ROWS })) }],
-            chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
-            plotOptions: { bar: { horizontal: false, borderRadius: 4 } },
-            xaxis: { labels: { style: { colors: '#6b7280', fontSize: '10px' }, rotate: -45 } },
-            yaxis: { title: { text: 'Orphan Count', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-            colors: ['#259EDC'], dataLabels: { enabled: false }, grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
-        });
-        chart.render();
-        this.charts.orphanRateBar = chart;
-    }
-
-    renderSchemaDriftLog() {
-        const container = document.getElementById('schemaDriftLog');
-        if (!container) return;
-        let html = '<div class="overflow-x-auto"><table class="min-w-full"><thead><tr class="border-b border-gray-200">'+
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Date</th>'+ 
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Change</th>'+ 
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Schema</th>'+ 
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Table</th>'+ 
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>'+ 
-            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Type</th>'+ 
-            '</tr></thead><tbody class="divide-y divide-gray-100" id="schemaDriftBody">';
-        (this.data.schemaDrift || []).forEach(item => {
-            const cls = item.CHANGE_TYPE==='ADDED'?'bg-green-100 text-green-800': item.CHANGE_TYPE==='REMOVED'?'bg-red-100 text-red-800':'bg-blue-100 text-blue-800';
-            html += `<tr class="hover:bg-gray-50" data-schema="${item.TABLE_SCHEMA}" data-table="${item.TABLE_NAME}">`+
-                `<td class="py-3 px-4 text-sm text-gray-500">${new Date(item.CHANGE_DATE).toLocaleDateString()}</td>`+
-                `<td class="py-3 px-4 text-sm"><span class="px-2 py-1 text-xs rounded-full ${cls}">${item.CHANGE_TYPE}</span></td>`+
-                `<td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_SCHEMA}</td>`+
-                `<td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_NAME}</td>`+
-                `<td class="py-3 px-4 text-sm font-mono text-gray-900">${item.COLUMN_NAME}</td>`+
-                `<td class="py-3 px-4 text-sm font-mono text-gray-500">${item.DATA_TYPE}</td></tr>`;
-        });
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
-        const filterInput = document.getElementById('schemaDriftFilter');
-        if (filterInput) {
-            filterInput.addEventListener('input', (e) => {
-                const val = e.target.value.toLowerCase();
-                document.querySelectorAll('#schemaDriftBody tr').forEach(tr => {
-                    const schema = tr.dataset.schema.toLowerCase();
-                    const table = tr.dataset.table.toLowerCase();
-                    const text = tr.textContent.toLowerCase();
-                    tr.style.display = (schema.includes(val) || table.includes(val) || text.includes(val)) ? '' : 'none';
-                });
-            });
-        }
-    }
-
-    // Build data for throughput trend using existing dailyBytes as base
-    buildThroughputSeries() {
-        const dates = [...new Set(this.data.dailyBytes.map(d => new Date(d.RUN_DATE).toISOString().split('T')[0]))].sort();
-        const rowsPerSec = [];
-        const bytesPerSec = [];
-        const rowsValues = [];
-        const bytesValues = [];
-        dates.forEach(date => {
-            // Synthesize rows/sec loosely proportional to bytes
-            const bytesItem = this.data.dailyBytes.find(x => new Date(x.RUN_DATE).toISOString().split('T')[0] === date);
-            const bytes = bytesItem ? bytesItem.AVG_BYTES_INSERTED : 0;
-            const rows = bytes > 0 ? Math.max(50, Math.round(bytes / (1024 * 1024))) : Math.round(Math.random() * 500 + 100);
-            const rps = rows / (24 * 60 * 60);
-            const bps = bytes / (24 * 60 * 60);
-            rowsPerSec.push({ x: date, y: parseFloat(rps.toFixed(2)) });
-            bytesPerSec.push({ x: date, y: parseFloat(bps.toFixed(2)) });
-            rowsValues.push(rps);
-            bytesValues.push(bps);
-        });
-
-        // 30-day medians
-        const median = (arr) => {
-            const s = [...arr].sort((a, b) => a - b);
-            const mid = Math.floor(s.length / 2);
-            return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-        };
-        const rowsMed = median(rowsValues);
-        const bytesMed = median(bytesValues);
-        const rowsMedian = dates.map(d => ({ x: d, y: parseFloat(rowsMed.toFixed(2)) }));
-        const bytesMedian = dates.map(d => ({ x: d, y: parseFloat(bytesMed.toFixed(2)) }));
-
-        return { dates, rowsPerSec, bytesPerSec, rowsMedian, bytesMedian };
-    }
-
-    renderThroughputTrendChart() {
-        const container = document.querySelector('#throughputTrendChart');
-        if (!container) return;
-        try {
-            const seriesData = this.buildThroughputSeries();
-            const chart = new ApexCharts(container, {
-                series: [
-                    { name: 'Rows/sec', type: 'line', data: seriesData.rowsPerSec },
-                    { name: 'Bytes/sec', type: 'line', data: seriesData.bytesPerSec },
-                    { name: 'Rows/sec Median (30d)', type: 'line', data: seriesData.rowsMedian },
-                    { name: 'Bytes/sec Median (30d)', type: 'line', data: seriesData.bytesMedian }
-                ],
-                chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
-                stroke: { width: [2, 2, 1, 1], curve: 'smooth' },
-                colors: ['#56CCF2', '#2F80ED', '#a3d5ff', '#7ec8ff'],
-                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
-                yaxis: [{
-                    title: { text: 'Rows/sec', style: { color: '#6b7280' } },
-                    labels: { style: { colors: '#6b7280', fontSize: '12px' } }
-                }, {
-                    opposite: true,
-                    title: { text: 'Bytes/sec', style: { color: '#6b7280' } },
-                    labels: { style: { colors: '#6b7280', fontSize: '12px' } }
-                }],
-                dataLabels: { enabled: false },
-                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-                legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } }
-            });
-            chart.render();
-            this.charts.throughputTrend = chart;
-        } catch (e) {
-            console.error('Error rendering throughput trend:', e);
-            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Unable to render throughput trend</div>';
-        }
+        // Query Performance Bee Swarm Chart (placeholder - method doesn't exist yet)
+        // this.renderQuerySwarmChart();
+        
+        // Render new charts
+        this.renderThroughputTrendChart();
+        this.renderSlowRunsTable();
     }
 
     renderPipelineCharts() {
@@ -2222,8 +2157,8 @@ ORDER BY total_users DESC`,
 
         // Data Freshness Table
         this.renderFreshnessTable();
-
-        // E2E Latency Heatmap & Freshness Delta
+        
+        // Render new charts
         this.renderE2ELatencyHeatmap();
         this.renderFreshnessDeltaBar();
     }
@@ -2381,6 +2316,11 @@ ORDER BY total_users DESC`,
             }
         });
         this.charts.datasetCostChart.render();
+    }
+
+    renderQualityCharts() {
+        // Data quality charts - placeholder for now
+        console.log('Quality charts rendered');
     }
 
     // Data processing methods
@@ -2560,7 +2500,7 @@ ORDER BY total_users DESC`,
         const tbody = document.getElementById('freshnessBody');
         tbody.innerHTML = '';
         
-        (this.data.dataFreshness || []).forEach(item => {
+        this.data.dataFreshness.forEach(item => {
             const row = document.createElement('tr');
             const status = item.HOURS_SINCE_LAST_RUN > 24 ? 'error' : 
                           item.HOURS_SINCE_LAST_RUN > 12 ? 'warning' : 'success';
@@ -2588,102 +2528,6 @@ ORDER BY total_users DESC`,
             `;
             tbody.appendChild(row);
         });
-    }
-
-    // Prepare heatmap buckets and tooltip data from recordFreshness
-    prepareLatencyHeatmapData() {
-        const bucketHours = (h) => {
-            if (h <= 6) return { label: '0-6h', value: 1 };
-            if (h <= 12) return { label: '6-12h', value: 2 };
-            if (h <= 24) return { label: '12-24h', value: 3 };
-            if (h <= 48) return { label: '24-48h', value: 4 };
-            return { label: '48h+', value: 5 };
-        };
-
-        const seriesMap = {};
-        const tooltipMap = {};
-        (this.data.recordFreshness || []).forEach(row => {
-            const ds = row.DATASET;
-            const dateKey = new Date(row.AS_OF_DATE).toISOString().split('T')[0];
-            const bucket = bucketHours(row.HOURS_BEHIND_NOW);
-            if (!seriesMap[ds]) { seriesMap[ds] = []; tooltipMap[ds] = []; }
-            seriesMap[ds].push({ x: dateKey, y: bucket.value });
-            tooltipMap[ds].push({ dataset: ds, date: dateKey, hoursBehind: row.HOURS_BEHIND_NOW, sourceTs: row.MAX_SOURCE_TS, bucket: bucket.label });
-        });
-        const series = Object.keys(seriesMap).map(k => ({ name: k, data: seriesMap[k] }));
-        const tooltipData = Object.keys(tooltipMap).map(k => tooltipMap[k]);
-        return { series, tooltipData };
-    }
-
-    renderE2ELatencyHeatmap() {
-        const container = document.querySelector('#e2eLatencyHeatmap');
-        if (!container) return;
-        try {
-            const heatmapData = this.prepareLatencyHeatmapData();
-            const chart = new ApexCharts(container, {
-                series: heatmapData.series,
-                chart: { type: 'heatmap', height: 320, fontFamily: 'Inter, sans-serif' },
-                colors: ['#56CCF2'],
-                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-                yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-                dataLabels: { enabled: false },
-                grid: { borderColor: '#e5e7eb' },
-                tooltip: {
-                    custom: ({ seriesIndex, dataPointIndex }) => {
-                        const d = heatmapData.tooltipData[seriesIndex]?.[dataPointIndex];
-                        if (!d) return '';
-                        return `\
-<div class="p-3">\
-  <div class="font-medium">${d.dataset}</div>\
-  <div class="text-sm text-gray-600 mt-1">\
-    Date: ${new Date(d.date).toLocaleDateString()}<br/>\
-    Hours Behind: ${d.hoursBehind}h<br/>\
-    Source TS: ${new Date(d.sourceTs).toLocaleString()}<br/>\
-    Bucket: ${d.bucket}\
-  </div>\
-</div>`;
-                    }
-                }
-            });
-            chart.render();
-            this.charts.e2eLatencyHeatmap = chart;
-        } catch (e) {
-            console.error('Error rendering E2E heatmap:', e);
-            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Heatmap unavailable</div>';
-        }
-    }
-
-    renderFreshnessDeltaBar() {
-        const container = document.getElementById('freshnessDeltaBar');
-        if (!container) return;
-        try {
-            const joined = (this.data.recordFreshness || []).map(rf => {
-                const domo = (this.data.domoDataFreshness || []).find(d => d.DATASET === rf.DATASET) || { HOURS_SINCE_LAST_RUN: 0 };
-                return {
-                    DATASET: rf.DATASET,
-                    HOURS_BEHIND_NOW: rf.HOURS_BEHIND_NOW,
-                    HOURS_SINCE_LAST_RUN: domo.HOURS_SINCE_LAST_RUN,
-                    DELTA: rf.HOURS_BEHIND_NOW - domo.HOURS_SINCE_LAST_RUN
-                };
-            });
-            const top10 = joined.sort((a,b) => Math.abs(b.DELTA) - Math.abs(a.DELTA)).slice(0,10);
-            if (!top10.length) { container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No freshness deltas</div>'; return; }
-            const chart = new ApexCharts(container, {
-                series: [{ name: 'Delta (Hours)', data: top10.map(d => ({ x: d.DATASET, y: d.DELTA })) }],
-                chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
-                plotOptions: { bar: { horizontal: true, barHeight: '70%', distributed: true } },
-                colors: top10.map(d => d.DELTA > 0 ? '#f59e0b' : '#3b82f6'),
-                xaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } }, title: { text: 'Hours', style: { color: '#6b7280' } } },
-                yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-                dataLabels: { enabled: false },
-                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
-            });
-            chart.render();
-            this.charts.freshnessDeltaBar = chart;
-        } catch (e) {
-            console.error('Error rendering freshness delta:', e);
-            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Delta unavailable</div>';
-        }
     }
 
     // Query Optimization Methods
@@ -3340,6 +3184,1021 @@ ORDER BY total_users DESC`,
                 tooltip.classList.remove('visible');
             });
         });
+    }
+
+
+
+    // New chart implementations
+    renderThroughputTrendChart() {
+        try {
+            // Prepare data for dual-axis line chart
+            const chartData = this.prepareThroughputData();
+            
+            const options = {
+                series: [
+                    {
+                        name: 'Rows/sec',
+                        type: 'line',
+                        yAxisIndex: 0,
+                        data: chartData.rowsData
+                    },
+                    {
+                        name: 'Bytes/sec',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: chartData.bytesData
+                    },
+                    {
+                        name: 'Rows/sec Median (30d)',
+                        type: 'line',
+                        yAxisIndex: 0,
+                        data: chartData.rowsMedian,
+                        strokeDashArray: 4,
+                        opacity: 0.5
+                    },
+                    {
+                        name: 'Bytes/sec Median (30d)',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: chartData.bytesMedian,
+                        strokeDashArray: 4,
+                        opacity: 0.5
+                    }
+                ],
+                chart: {
+                    type: 'line',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false },
+                    zoom: { enabled: false }
+                },
+                colors: ['#56CCF2', '#2F80ED', '#a3d5ff', '#7ec8ff'],
+                stroke: {
+                    width: [2, 2, 1, 1],
+                    curve: 'smooth'
+                },
+                xaxis: {
+                    categories: chartData.dates,
+                    type: 'datetime',
+                    labels: {
+                        style: { colors: '#6b7280', fontSize: '11px' }
+                    }
+                },
+                yaxis: [
+                    {
+                        title: { text: 'Rows/sec', style: { color: '#6b7280' } },
+                        labels: {
+                            style: { colors: '#6b7280' },
+                            formatter: (val) => val ? val.toLocaleString() : '0'
+                        }
+                    },
+                    {
+                        opposite: true,
+                        title: { text: 'Bytes/sec', style: { color: '#6b7280' } },
+                        labels: {
+                            style: { colors: '#6b7280' },
+                            formatter: (val) => val ? this.formatBytes(val) : '0'
+                        }
+                    }
+                ],
+                tooltip: {
+                    shared: true,
+                    intersect: false,
+                    custom: function({series, seriesIndex, dataPointIndex, w}) {
+                        const date = chartData.dates[dataPointIndex];
+                        const topDatasets = chartData.topDatasets[dataPointIndex] || [];
+                        
+                        let html = `<div class="bg-gray-900 text-white p-3 rounded-lg text-xs">`;
+                        html += `<div class="font-semibold mb-2">${new Date(date).toLocaleDateString()}</div>`;
+                        html += `<div class="mb-2">Rows/sec: ${series[0][dataPointIndex].toLocaleString()}</div>`;
+                        html += `<div class="mb-2">Bytes/sec: ${dashboard.formatBytes(series[1][dataPointIndex])}</div>`;
+                        if (topDatasets.length > 0) {
+                            html += `<div class="text-gray-300 text-xs">Top datasets:</div>`;
+                            topDatasets.slice(0, 3).forEach(ds => {
+                                html += `<div class="text-xs">• ${ds}</div>`;
+                            });
+                        }
+                        html += `</div>`;
+                        return html;
+                    }
+                },
+                legend: {
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#6b7280' }
+                },
+                grid: {
+                    borderColor: '#e5e7eb',
+                    strokeDashArray: 1
+                }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#throughputTrendChart"), options);
+            chart.render();
+            this.charts.throughputTrend = chart;
+        } catch (error) {
+            console.error('Error rendering throughput trend chart:', error);
+            document.getElementById('throughputTrendChart').innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Chart loading error</div>';
+        }
+    }
+
+    prepareThroughputData() {
+        // Group data by date and aggregate
+        const dailyData = {};
+        
+        this.data.pipelineThroughput.forEach(row => {
+            const dateKey = row.RUN_DATE.toISOString().split('T')[0];
+            if (!dailyData[dateKey]) {
+                dailyData[dateKey] = {
+                    rowsPerSec: 0,
+                    bytesPerSec: 0,
+                    datasets: new Set()
+                };
+            }
+            dailyData[dateKey].rowsPerSec += row.ROWS_PER_SEC;
+            dailyData[dateKey].bytesPerSec += row.BYTES_PER_SEC;
+            dailyData[dateKey].datasets.add(row.DATASET);
+        });
+
+        // Calculate 30-day medians
+        const rowsValues = Object.values(dailyData).map(d => d.rowsPerSec);
+        const bytesValues = Object.values(dailyData).map(d => d.bytesPerSec);
+        const rowsMedian = this.calculateMedian(rowsValues);
+        const bytesMedian = this.calculateMedian(bytesValues);
+
+        const dates = Object.keys(dailyData).sort();
+        const rowsData = dates.map(date => dailyData[date].rowsPerSec);
+        const bytesData = dates.map(date => dailyData[date].bytesPerSec);
+        const topDatasets = dates.map(date => Array.from(dailyData[date].datasets));
+
+        return {
+            dates,
+            rowsData,
+            bytesData,
+            rowsMedian: new Array(dates.length).fill(rowsMedian),
+            bytesMedian: new Array(dates.length).fill(bytesMedian),
+            topDatasets
+        };
+    }
+
+    renderSlowRunsTable() {
+        try {
+            // Get the 15 slowest successful runs
+            const slowestRuns = this.data.connectorRuns
+                .filter(run => run.Status === 'SUCCESS')
+                .sort((a, b) => b['Run Time Seconds'] - a['Run Time Seconds'])
+                .slice(0, 15);
+
+            let html = `
+                <div class="overflow-auto h-full">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="dashboard.sortSlowRunsTable('dataset')">
+                                    Dataset
+                                </th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="dashboard.sortSlowRunsTable('startTime')">
+                                    Run Start
+                                </th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="dashboard.sortSlowRunsTable('runTime')">
+                                    Run Time (s)
+                                </th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="dashboard.sortSlowRunsTable('rowsPerSec')">
+                                    Rows/sec
+                                </th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="dashboard.sortSlowRunsTable('bytesPerSec')">
+                                    Bytes/sec
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+            `;
+
+            slowestRuns.forEach(run => {
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-2 text-sm text-gray-900">${run['Data Source Name']}</td>
+                        <td class="px-3 py-2 text-sm text-gray-500">${new Date(run['Start Time']).toLocaleString()}</td>
+                        <td class="px-3 py-2 text-sm font-mono text-gray-900">${run['Run Time Seconds'].toLocaleString()}</td>
+                        <td class="px-3 py-2 text-sm font-mono text-gray-900">${run['Rows Per Second'].toLocaleString()}</td>
+                        <td class="px-3 py-2 text-sm font-mono text-gray-900">${this.formatBytes(run['Bytes Per Second'])}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            document.getElementById('slowRunsTable').innerHTML = html;
+        } catch (error) {
+            console.error('Error rendering slow runs table:', error);
+            document.getElementById('slowRunsTable').innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Table loading error</div>';
+        }
+    }
+
+    renderE2ELatencyHeatmap() {
+        try {
+            // Prepare heatmap data
+            const heatmapData = this.prepareLatencyHeatmapData();
+            
+            const options = {
+                series: heatmapData.series,
+                chart: {
+                    type: 'heatmap',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false }
+                },
+                colors: ['#56CCF2'],
+                xaxis: {
+                    type: 'datetime',
+                    labels: {
+                        style: { colors: '#6b7280', fontSize: '11px' }
+                    }
+                },
+                yaxis: {
+                    labels: {
+                        style: { colors: '#6b7280', fontSize: '11px' }
+                    }
+                },
+                tooltip: {
+                    custom: function({series, seriesIndex, dataPointIndex, w}) {
+                        const dataPoint = heatmapData.tooltipData[seriesIndex][dataPointIndex];
+                        if (!dataPoint) return '';
+                        
+                        return `<div class="bg-gray-900 text-white p-3 rounded-lg text-xs">
+                            <div class="font-semibold">${dataPoint.dataset}</div>
+                            <div>Date: ${new Date(dataPoint.date).toLocaleDateString()}</div>
+                            <div>Hours Behind: ${dataPoint.hoursBehind.toFixed(1)}h</div>
+                            <div>Source Timestamp: ${new Date(dataPoint.sourceTs).toLocaleString()}</div>
+                            <div>Bucket: ${dataPoint.bucket}</div>
+                        </div>`;
+                    }
+                },
+                legend: {
+                    show: true,
+                    position: 'bottom',
+                    labels: { colors: '#6b7280' }
+                },
+                grid: {
+                    borderColor: '#e5e7eb'
+                }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#e2eLatencyHeatmap"), options);
+            chart.render();
+            this.charts.e2eLatencyHeatmap = chart;
+        } catch (error) {
+            console.error('Error rendering E2E latency heatmap:', error);
+            document.getElementById('e2eLatencyHeatmap').innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Heatmap loading error</div>';
+        }
+    }
+
+    prepareLatencyHeatmapData() {
+        // Bucket hours behind into categories
+        const bucketHours = (hours) => {
+            if (hours <= 6) return { label: '0-6h', value: 1, color: '#10B981' };
+            if (hours <= 12) return { label: '6-12h', value: 2, color: '#F59E0B' };
+            if (hours <= 24) return { label: '12-24h', value: 3, color: '#EF4444' };
+            if (hours <= 48) return { label: '24-48h', value: 4, color: '#8B5CF6' };
+            return { label: '48h+', value: 5, color: '#DC2626' };
+        };
+
+        // Group data by dataset and date
+        const heatmapSeries = {};
+        const tooltipData = {};
+        
+        this.data.recordFreshness.forEach(row => {
+            const dataset = row.DATASET;
+            const dateKey = row.AS_OF_DATE.toISOString().split('T')[0];
+            const bucket = bucketHours(row.HOURS_BEHIND_NOW);
+            
+            if (!heatmapSeries[dataset]) {
+                heatmapSeries[dataset] = [];
+                tooltipData[dataset] = [];
+            }
+            
+            heatmapSeries[dataset].push({
+                x: dateKey,
+                y: bucket.value
+            });
+            
+            tooltipData[dataset].push({
+                dataset,
+                date: dateKey,
+                hoursBehind: row.HOURS_BEHIND_NOW,
+                sourceTs: row.MAX_SOURCE_TS,
+                bucket: bucket.label
+            });
+        });
+
+        const series = Object.keys(heatmapSeries).map(dataset => ({
+            name: dataset,
+            data: heatmapSeries[dataset]
+        }));
+
+        return { series, tooltipData };
+    }
+
+    // Helper methods
+    calculateMedian(values) {
+        if (values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 
+            ? (sorted[mid - 1] + sorted[mid]) / 2 
+            : sorted[mid];
+    }
+
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    sortSlowRunsTable(column) {
+        // Table sorting functionality - placeholder
+        console.log('Sorting by:', column);
+    }
+
+    renderDatasetCostTable() {
+        try {
+            // Generate sample dataset cost data
+            const datasetCosts = [
+                { DATASET_NAME: 'USER_ACTIVITY', CREDITS: 125.5, COST_USD: 125.50 },
+                { DATASET_NAME: 'SALES_DATA', CREDITS: 98.2, COST_USD: 98.20 },
+                { DATASET_NAME: 'MARKETING_EVENTS', CREDITS: 76.8, COST_USD: 76.80 },
+                { DATASET_NAME: 'PRODUCT_CATALOG', CREDITS: 54.3, COST_USD: 54.30 },
+                { DATASET_NAME: 'CUSTOMER_SUPPORT', CREDITS: 43.7, COST_USD: 43.70 }
+            ];
+
+            let html = `
+                <thead>
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Credits</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Cost (USD)</th>
+                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Trend</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+            `;
+
+            datasetCosts.forEach((item, index) => {
+                const trend = index % 2 === 0 ? '↑ +5.2%' : '↓ -2.1%';
+                const trendClass = index % 2 === 0 ? 'text-green-600' : 'text-red-600';
+                
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="py-3 px-4 text-sm text-gray-900">${item.DATASET_NAME}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-900">${item.CREDITS.toFixed(1)}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-900">$${item.COST_USD.toFixed(2)}</td>
+                        <td class="py-3 px-4 text-sm ${trendClass}">${trend}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody>';
+            document.getElementById('datasetCostBody').innerHTML = html;
+        } catch (error) {
+            console.error('Error rendering dataset cost table:', error);
+        }
+    }
+
+    renderFreshnessTable() {
+        try {
+            // Generate sample freshness data
+            const freshnessData = [
+                { DATASET: 'USER_ACTIVITY', HOURS_SINCE_LAST_RUN: 2.5, STATUS: 'Fresh', LAST_UPDATE: new Date(Date.now() - 2.5 * 60 * 60 * 1000) },
+                { DATASET: 'SALES_DATA', HOURS_SINCE_LAST_RUN: 18.2, STATUS: 'Stale', LAST_UPDATE: new Date(Date.now() - 18.2 * 60 * 60 * 1000) },
+                { DATASET: 'MARKETING_EVENTS', HOURS_SINCE_LAST_RUN: 6.7, STATUS: 'Fresh', LAST_UPDATE: new Date(Date.now() - 6.7 * 60 * 60 * 1000) },
+                { DATASET: 'PRODUCT_CATALOG', HOURS_SINCE_LAST_RUN: 25.1, STATUS: 'Stale', LAST_UPDATE: new Date(Date.now() - 25.1 * 60 * 60 * 1000) },
+                { DATASET: 'CUSTOMER_SUPPORT', HOURS_SINCE_LAST_RUN: 1.8, STATUS: 'Fresh', LAST_UPDATE: new Date(Date.now() - 1.8 * 60 * 60 * 1000) }
+            ];
+
+            let html = '';
+            freshnessData.forEach(item => {
+                const statusClass = item.STATUS === 'Fresh' ? 'status-success' : 'status-warning';
+                
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="py-3 px-4 text-sm text-gray-900">${item.DATASET}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-900">${item.HOURS_SINCE_LAST_RUN.toFixed(1)}h</td>
+                        <td class="py-3 px-4 text-sm">
+                            <span class="${statusClass}">${item.STATUS}</span>
+                        </td>
+                        <td class="py-3 px-4 text-sm text-gray-500">${item.LAST_UPDATE.toLocaleString()}</td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('freshnessBody').innerHTML = html;
+        } catch (error) {
+            console.error('Error rendering freshness table:', error);
+        }
+    }
+
+    processSLABreaches() {
+        // Generate sample SLA breach data for heatmap
+        const connectors = ['SALESFORCE.ACCOUNTS', 'Raidar Accounts', 'rootCauseRecord', 'forecastRecord'];
+        const dates = [];
+        
+        // Generate last 30 days
+        for (let i = 29; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            dates.push(date.toISOString().split('T')[0]);
+        }
+
+        const series = connectors.map(connector => ({
+            name: connector,
+            data: dates.map(date => ({
+                x: date,
+                y: Math.floor(Math.random() * 5) // 0-4 breaches
+            }))
+        }));
+
+        return { series, dates };
+    }
+
+    renderQualityCharts() {
+        // Render all Data Quality charts
+        this.renderCoverageAnomaliesChart();
+        this.renderNullsAndDupesTable();
+        this.renderAccuracyViolationsTrend();
+        this.renderOrphanRateBar();
+        this.renderSchemaDriftLog();
+    }
+
+    renderFreshnessDeltaBar() {
+        try {
+            // Prepare delta data by joining recordFreshness and domoDataFreshness
+            const deltaData = [];
+            
+            this.data.recordFreshness.forEach(record => {
+                const domoData = this.data.domoDataFreshness.find(d => d.DATASET === record.DATASET);
+                if (domoData) {
+                    const delta = record.HOURS_BEHIND_NOW - domoData.HOURS_SINCE_LAST_RUN;
+                    deltaData.push({
+                        DATASET: record.DATASET,
+                        HOURS_BEHIND_NOW: record.HOURS_BEHIND_NOW,
+                        HOURS_SINCE_LAST_RUN: domoData.HOURS_SINCE_LAST_RUN,
+                        DELTA: delta
+                    });
+                }
+            });
+
+            // Sort by absolute delta and take top 10
+            deltaData.sort((a, b) => Math.abs(b.DELTA) - Math.abs(a.DELTA));
+            const top10 = deltaData.slice(0, 10);
+
+            this.charts.freshnessDeltaBar = new ApexCharts(document.querySelector("#freshnessDeltaBar"), {
+                series: [{
+                    name: 'Delta (Hours)',
+                    data: top10.map(item => ({
+                        x: item.DATASET,
+                        y: item.DELTA,
+                        fillColor: item.DELTA > 0 ? '#fbbf24' : '#3b82f6' // Warm for positive, cool for negative
+                    }))
+                }],
+                chart: {
+                    type: 'bar',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif'
+                },
+                plotOptions: {
+                    bar: {
+                        horizontal: true,
+                        barHeight: '70%',
+                        distributed: true
+                    }
+                },
+                xaxis: {
+                    title: { text: 'Hours Difference', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                yaxis: {
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { show: false },
+                tooltip: {
+                    custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                        const data = top10[dataPointIndex];
+                        return `<div class="p-3">
+                            <div class="font-medium">${data.DATASET}</div>
+                            <div class="text-sm text-gray-600 mt-1">
+                                Source lag: ${data.HOURS_BEHIND_NOW.toFixed(1)}h<br/>
+                                Pipeline lag: ${data.HOURS_SINCE_LAST_RUN.toFixed(1)}h<br/>
+                                Delta: ${data.DELTA.toFixed(1)}h
+                            </div>
+                        </div>`;
+                    }
+                }
+            });
+            this.charts.freshnessDeltaBar.render();
+        } catch (error) {
+            console.error('Error rendering freshness delta bar:', error);
+        }
+    }
+
+    renderCoverageAnomaliesChart() {
+        try {
+            // Process data by dataset
+            const datasetSeries = {};
+            const anomalies = [];
+
+            this.data.dataCoverage.forEach(item => {
+                if (!datasetSeries[item.DATASET]) {
+                    datasetSeries[item.DATASET] = [];
+                }
+                
+                datasetSeries[item.DATASET].push({
+                    x: item.RUN_DATE,
+                    y: item.ROWS_LOADED
+                });
+
+                // Mark anomalies (|z-score| >= 2)
+                if (Math.abs(item.ZSCORE_ROWS_LOADED) >= 2) {
+                    anomalies.push({
+                        x: item.RUN_DATE,
+                        y: item.ROWS_LOADED,
+                        dataset: item.DATASET,
+                        zscore: item.ZSCORE_ROWS_LOADED,
+                        avgRows: item.AVG_ROWS_30D
+                    });
+                }
+            });
+
+            // Create series for the first 3 datasets to avoid clutter
+            const datasets = Object.keys(datasetSeries).slice(0, 3);
+            const series = datasets.map(dataset => ({
+                name: dataset,
+                type: 'line',
+                data: datasetSeries[dataset]
+            }));
+
+            // Add anomaly markers
+            series.push({
+                name: 'Anomalies',
+                type: 'scatter',
+                data: anomalies.map(a => ({ x: a.x, y: a.y }))
+            });
+
+            this.charts.coverageAnomaliesChart = new ApexCharts(document.querySelector("#coverageAnomaliesChart"), {
+                series: series,
+                chart: {
+                    type: 'line',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif'
+                },
+                stroke: {
+                    width: [2, 2, 2, 0],
+                    curve: 'smooth'
+                },
+                markers: {
+                    size: [0, 0, 0, 6]
+                },
+                xaxis: {
+                    type: 'datetime',
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                yaxis: {
+                    title: { text: 'Rows Loaded', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: {
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#374151' }
+                },
+                tooltip: {
+                    custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                        if (seriesIndex === 3) { // Anomaly point
+                            const anomaly = anomalies[dataPointIndex];
+                            return `<div class="p-3">
+                                <div class="font-medium">${anomaly.dataset} - Anomaly</div>
+                                <div class="text-sm text-gray-600 mt-1">
+                                    Rows: ${anomaly.y.toLocaleString()}<br/>
+                                    Z-Score: ${anomaly.zscore.toFixed(2)}<br/>
+                                    30-day Avg: ${anomaly.avgRows.toLocaleString()}
+                                </div>
+                            </div>`;
+                        }
+                        return null; // Use default tooltip for other series
+                    }
+                }
+            });
+            this.charts.coverageAnomaliesChart.render();
+        } catch (error) {
+            console.error('Error rendering coverage anomalies chart:', error);
+        }
+    }
+
+    renderNullsAndDupesTable() {
+        try {
+            // Process completeness data to find issues
+            const issues = [];
+            
+            this.data.dataCompleteness.forEach(item => {
+                // Add PK duplicates if any
+                if (item.DUP_PK_COUNT > 0) {
+                    issues.push({
+                        column: 'PRIMARY_KEY',
+                        dataset: item.DATASET,
+                        issue: 'Duplicates',
+                        value: item.DUP_PK_COUNT,
+                        rowCount: item.ROW_COUNT,
+                        severity: item.DUP_PK_COUNT > 10 ? 'high' : 'medium'
+                    });
+                }
+                
+                // Add high null rates
+                Object.keys(item).forEach(key => {
+                    if (key.startsWith('NULL_PCT_') && item[key] > 5) {
+                        const column = key.replace('NULL_PCT_', '');
+                        issues.push({
+                            column: column,
+                            dataset: item.DATASET,
+                            issue: 'High Null Rate',
+                            value: item[key],
+                            rowCount: item.ROW_COUNT,
+                            severity: item[key] > 10 ? 'high' : 'medium'
+                        });
+                    }
+                });
+            });
+
+            // Sort by severity and value, take top 15
+            issues.sort((a, b) => {
+                if (a.severity !== b.severity) {
+                    return a.severity === 'high' ? -1 : 1;
+                }
+                return b.value - a.value;
+            });
+            const top15 = issues.slice(0, 15);
+
+            let html = `
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="border-b border-gray-200">
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Issue</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Value</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Row Count</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+            `;
+
+            top15.forEach(issue => {
+                const badgeClass = issue.severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
+                const valueDisplay = issue.issue === 'Duplicates' ? issue.value.toString() : `${issue.value.toFixed(1)}%`;
+                
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="py-3 px-4 text-sm text-gray-900">${issue.column}</td>
+                        <td class="py-3 px-4 text-sm text-gray-900">${issue.dataset}</td>
+                        <td class="py-3 px-4 text-sm">
+                            <span class="px-2 py-1 text-xs rounded-full ${badgeClass}">${issue.issue}</span>
+                        </td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-900">${valueDisplay}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-500">${issue.rowCount.toLocaleString()}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table></div>';
+            document.getElementById('nullsAndDupesTable').innerHTML = html;
+        } catch (error) {
+            console.error('Error rendering nulls and dupes table:', error);
+        }
+    }
+
+    renderAccuracyViolationsTrend() {
+        try {
+            // Aggregate violations by day and rule
+            const dailyViolations = {};
+            
+            this.data.dataAccuracy.forEach(item => {
+                const dateKey = item.RUN_TS.toISOString().split('T')[0];
+                if (!dailyViolations[dateKey]) {
+                    dailyViolations[dateKey] = {};
+                }
+                if (!dailyViolations[dateKey][item.RULE_ID]) {
+                    dailyViolations[dateKey][item.RULE_ID] = 0;
+                }
+                dailyViolations[dateKey][item.RULE_ID] += item.VIOLATIONS;
+            });
+
+            // Get top 8 rules by total violations
+            const ruleViolations = {};
+            this.data.dataAccuracy.forEach(item => {
+                if (!ruleViolations[item.RULE_ID]) {
+                    ruleViolations[item.RULE_ID] = 0;
+                }
+                ruleViolations[item.RULE_ID] += item.VIOLATIONS;
+            });
+            
+            const topRules = Object.keys(ruleViolations)
+                .sort((a, b) => ruleViolations[b] - ruleViolations[a])
+                .slice(0, 8);
+
+            // Create series for each rule
+            const dates = Object.keys(dailyViolations).sort();
+            const series = topRules.map(ruleId => ({
+                name: ruleId,
+                data: dates.map(date => ({
+                    x: date,
+                    y: dailyViolations[date][ruleId] || 0
+                }))
+            }));
+
+            this.charts.accuracyViolationsTrend = new ApexCharts(document.querySelector("#accuracyViolationsTrend"), {
+                series: series,
+                chart: {
+                    type: 'area',
+                    height: 320,
+                    stacked: true,
+                    fontFamily: 'Inter, sans-serif'
+                },
+                stroke: {
+                    curve: 'smooth',
+                    width: 2
+                },
+                fill: {
+                    type: 'gradient',
+                    gradient: {
+                        opacityFrom: 0.6,
+                        opacityTo: 0.1
+                    }
+                },
+                xaxis: {
+                    type: 'datetime',
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                yaxis: {
+                    title: { text: 'Violations', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: {
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#374151' }
+                },
+                annotations: {
+                    yaxis: [{
+                        y: 0,
+                        borderColor: '#6b7280',
+                        strokeDashArray: 5,
+                        label: {
+                            text: 'Zero Line',
+                            style: { color: '#6b7280' }
+                        }
+                    }]
+                }
+            });
+            this.charts.accuracyViolationsTrend.render();
+        } catch (error) {
+            console.error('Error rendering accuracy violations trend:', error);
+        }
+    }
+
+    renderOrphanRateBar() {
+        try {
+            // Sort by orphan count desc and take top 10
+            const sortedData = [...this.data.dataConsistency]
+                .sort((a, b) => b.ORPHAN_ROWS - a.ORPHAN_ROWS)
+                .slice(0, 10);
+
+            this.charts.orphanRateBar = new ApexCharts(document.querySelector("#orphanRateBar"), {
+                series: [{
+                    name: 'Orphan Rows',
+                    data: sortedData.map(item => ({
+                        x: item.CHECK_NAME.replace('FK_', ''),
+                        y: item.ORPHAN_ROWS
+                    }))
+                }],
+                chart: {
+                    type: 'bar',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif'
+                },
+                plotOptions: {
+                    bar: {
+                        horizontal: false,
+                        borderRadius: 4,
+                        dataLabels: {
+                            position: 'top'
+                        }
+                    }
+                },
+                xaxis: {
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '10px' },
+                        rotate: -45
+                    }
+                },
+                yaxis: {
+                    title: { text: 'Orphan Count', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                colors: ['#ef4444'],
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                tooltip: {
+                    custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                        const data = sortedData[dataPointIndex];
+                        return `<div class="p-3">
+                            <div class="font-medium">${data.CHECK_NAME}</div>
+                            <div class="text-sm text-gray-600 mt-1">
+                                Orphan rows: ${data.ORPHAN_ROWS.toLocaleString()}<br/>
+                                Last checked: ${data.AS_OF_DATE.toLocaleDateString()}
+                            </div>
+                        </div>`;
+                    }
+                }
+            });
+            this.charts.orphanRateBar.render();
+        } catch (error) {
+            console.error('Error rendering orphan rate bar:', error);
+        }
+    }
+
+    renderSchemaDriftLog() {
+        try {
+            let html = `
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead>
+                            <tr class="border-b border-gray-200">
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Date</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Change</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Schema</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Table</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>
+                                <th class="text-left py-3 px-4 font-semibold text-gray-900">Type</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100" id="schemaDriftBody">
+            `;
+
+            this.data.schemaDrift.forEach(item => {
+                const changeClass = {
+                    'ADDED': 'bg-green-100 text-green-800',
+                    'REMOVED': 'bg-red-100 text-red-800',
+                    'MODIFIED': 'bg-blue-100 text-blue-800'
+                }[item.CHANGE_TYPE];
+                
+                html += `
+                    <tr class="hover:bg-gray-50" data-schema="${item.TABLE_SCHEMA}" data-table="${item.TABLE_NAME}">
+                        <td class="py-3 px-4 text-sm text-gray-500">${item.CHANGE_DATE.toLocaleDateString()}</td>
+                        <td class="py-3 px-4 text-sm">
+                            <span class="px-2 py-1 text-xs rounded-full ${changeClass}">${item.CHANGE_TYPE}</span>
+                        </td>
+                        <td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_SCHEMA}</td>
+                        <td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_NAME}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-900">${item.COLUMN_NAME}</td>
+                        <td class="py-3 px-4 text-sm font-mono text-gray-500">${item.DATA_TYPE}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table></div>';
+            document.getElementById('schemaDriftLog').innerHTML = html;
+
+            // Add filter functionality
+            const filterInput = document.getElementById('schemaDriftFilter');
+            if (filterInput) {
+                filterInput.addEventListener('input', (e) => {
+                    const filterValue = e.target.value.toLowerCase();
+                    const rows = document.querySelectorAll('#schemaDriftBody tr');
+                    
+                    rows.forEach(row => {
+                        const schema = row.dataset.schema.toLowerCase();
+                        const table = row.dataset.table.toLowerCase();
+                        const text = row.textContent.toLowerCase();
+                        
+                        if (schema.includes(filterValue) || table.includes(filterValue) || text.includes(filterValue)) {
+                            row.style.display = '';
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Error rendering schema drift log:', error);
+        }
+    }
+
+    renderCostPerRowLine() {
+        try {
+            // Calculate daily cost per successful row
+            const dailyCostPerRow = [];
+            
+            // Group costs by date
+            const costsByDate = {};
+            this.data.costPerCredit.forEach(item => {
+                const dateKey = item.USAGE_DATE.toISOString().split('T')[0];
+                if (!costsByDate[dateKey]) {
+                    costsByDate[dateKey] = 0;
+                }
+                costsByDate[dateKey] += item.SPEND_USD;
+            });
+
+            // Group throughput by date
+            const rowsByDate = {};
+            this.data.pipelineThroughput.forEach(item => {
+                const dateKey = item.RUN_DATE.toISOString().split('T')[0];
+                if (!rowsByDate[dateKey]) {
+                    rowsByDate[dateKey] = 0;
+                }
+                rowsByDate[dateKey] += item.ROWS_LOADED;
+            });
+
+            // Calculate cost per row for each date
+            Object.keys(costsByDate).forEach(date => {
+                const totalCost = costsByDate[date];
+                const totalRows = rowsByDate[date];
+                
+                if (totalRows > 0) { // Avoid division by zero
+                    dailyCostPerRow.push({
+                        x: date,
+                        y: totalCost / totalRows,
+                        cost: totalCost,
+                        rows: totalRows
+                    });
+                }
+            });
+
+            // Sort by date
+            dailyCostPerRow.sort((a, b) => new Date(a.x) - new Date(b.x));
+
+            this.charts.costPerRowLine = new ApexCharts(document.querySelector("#costPerRowLine"), {
+                series: [{
+                    name: 'Cost per Row ($)',
+                    data: dailyCostPerRow
+                }],
+                chart: {
+                    type: 'line',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif'
+                },
+                stroke: {
+                    curve: 'smooth',
+                    width: 3
+                },
+                markers: {
+                    size: 5,
+                    hover: { size: 7 }
+                },
+                xaxis: {
+                    type: 'datetime',
+                    labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+                },
+                yaxis: {
+                    title: { text: 'Cost per Row ($)', style: { color: '#6b7280' } },
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '11px' },
+                        formatter: (value) => '$' + value.toFixed(4)
+                    }
+                },
+                colors: ['#8b5cf6'],
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                tooltip: {
+                    custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                        const data = dailyCostPerRow[dataPointIndex];
+                        return `<div class="p-3">
+                            <div class="font-medium">Cost Efficiency</div>
+                            <div class="text-sm text-gray-600 mt-1">
+                                Date: ${new Date(data.x).toLocaleDateString()}<br/>
+                                Total Cost: $${data.cost.toLocaleString()}<br/>
+                                Total Rows: ${data.rows.toLocaleString()}<br/>
+                                Cost per Row: $${data.y.toFixed(4)}
+                            </div>
+                        </div>`;
+                    }
+                }
+            });
+            this.charts.costPerRowLine.render();
+        } catch (error) {
+            console.error('Error rendering cost per row line:', error);
+        }
     }
 }
 

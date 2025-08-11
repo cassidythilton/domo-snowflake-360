@@ -59,6 +59,14 @@
                         </button>
                     </li>
                     <li>
+                        <button class="nav-item" data-tab="quality">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Data Quality
+                        </button>
+                    </li>
+                    <li>
                         <button class="nav-item" data-tab="optimization">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
@@ -95,14 +103,46 @@
                         <p class="text-sm text-gray-600 mt-1">Monitor spend patterns and resource utilization</p>
                     </div>
                     <div class="flex items-center space-x-4">
-                        <div class="flex items-center space-x-2">
-                            <label class="text-sm font-medium text-gray-700">Period:</label>
-                            <select id="dateRange" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                                <option value="30">Last 30 days</option>
-                                <option value="60">Last 60 days</option>
-                                <option value="90">Last 90 days</option>
-                                <option value="180">Last 180 days</option>
-                            </select>
+                        <div class="flex items-center space-x-4">
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm font-medium text-gray-700">Period:</label>
+                                <select id="dateRange" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                    <option value="30">Last 30 days</option>
+                                    <option value="60">Last 60 days</option>
+                                    <option value="90">Last 90 days</option>
+                                    <option value="180">Last 180 days</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm font-medium text-gray-700">Warehouse:</label>
+                                <select id="warehouseFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                    <option value="">All Warehouses</option>
+                                    <option value="COMPUTE_WH">COMPUTE_WH</option>
+                                    <option value="ANALYTICS_WH">ANALYTICS_WH</option>
+                                    <option value="ETL_WH">ETL_WH</option>
+                                    <option value="REPORTING_WH">REPORTING_WH</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm font-medium text-gray-700">Database:</label>
+                                <select id="databaseFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                    <option value="">All Databases</option>
+                                    <option value="PROD_DB">PROD_DB</option>
+                                    <option value="ANALYTICS_DB">ANALYTICS_DB</option>
+                                    <option value="STAGING_DB">STAGING_DB</option>
+                                    <option value="DEV_DB">DEV_DB</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm font-medium text-gray-700">Schema:</label>
+                                <select id="schemaFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                    <option value="">All Schemas</option>
+                                    <option value="PUBLIC">PUBLIC</option>
+                                    <option value="RAW">RAW</option>
+                                    <option value="TRANSFORMED">TRANSFORMED</option>
+                                    <option value="MARTS">MARTS</option>
+                                </select>
+                            </div>
                         </div>
                         <button id="refreshBtn" class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors flex items-center space-x-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -232,6 +272,25 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         </div>
                     </div>
 
+                    <!-- Cost Efficiency Analysis -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Cost per Successful Row</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Efficiency trend over time</span>
+                                </div>
+                            </div>
+                            <div id="costPerRowLine" class="h-80"></div>
+                        </div>
+                        <div class="chart-card">
+                            <!-- Placeholder for future efficiency metric -->
+                            <div class="h-80 flex items-center justify-center text-gray-500">
+                                <p>Additional efficiency metrics coming soon</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Full Width Table -->
                     <div class="chart-card">
                         <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 10 Datasets by Cost</h3>
@@ -358,6 +417,17 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         <div id="queryPerformanceChart" class="h-80"></div>
                     </div>
 
+                    <!-- Throughput Trend Evolution -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Throughput Trend Evolution</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Rows/sec & Bytes/sec over time</span>
+                            </div>
+                        </div>
+                        <div id="throughputTrendChart" class="h-80"></div>
+                    </div>
+
                     <!-- Query Performance Analysis Bee Swarm -->
                     <div class="chart-card">
                         <div class="flex items-center justify-between mb-6">
@@ -372,6 +442,15 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         </div>
                     </div>
 
+                    <!-- Slowest Runs full-width row -->
+                    <div class="grid grid-cols-1 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Top Slowest Connector Runs</h3>
+                            <div id="slowRunsTable" class="h-80 overflow-auto"></div>
+                        </div>
+                    </div>
+
+                    <!-- Failure Rate + Events side-by-side -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
                             <h3 class="text-lg font-semibold text-gray-900 mb-6">Query Failure Rate Trend</h3>
@@ -483,6 +562,17 @@ WHERE RUN_DATE &gt;= :start_date</pre>
                         <div id="bytesApiChart" class="h-80"></div>
                     </div>
 
+                    <!-- End-to-End Latency Heatmap -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">End-to-End Latency Heatmap</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Source → Warehouse latency by dataset</span>
+                            </div>
+                        </div>
+                        <div id="e2eLatencyHeatmap" class="h-80"></div>
+                    </div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
                             <h3 class="text-lg font-semibold text-gray-900 mb-6">Connector Success Rate</h3>
@@ -494,22 +584,37 @@ WHERE RUN_DATE &gt;= :start_date</pre>
                         </div>
                     </div>
 
-                    <!-- Full Width Table -->
-                    <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Data Freshness Status</h3>
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full" id="freshnessTable">
-                                <thead>
-                                    <tr class="border-b border-gray-200">
-                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
-                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Hours Since Last Run</th>
-                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Status</th>
-                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Last Update</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="freshnessBody" class="divide-y divide-gray-100">
-                                </tbody>
-                            </table>
+                    <!-- Record Freshness vs Last Run Delta -->
+                    <div class="grid grid-cols-1 gap-8">
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Record Freshness vs Last Run</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Delta analysis</span>
+                                </div>
+                            </div>
+                            <div id="freshnessDeltaBar" class="h-80"></div>
+                        </div>
+                    </div>
+
+                    <!-- Data Freshness Status full-width row -->
+                    <div class="grid grid-cols-1 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Data Freshness Status</h3>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full" id="freshnessTable">
+                                    <thead>
+                                        <tr class="border-b border-gray-200">
+                                            <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+                                            <th class="text-left py-3 px-4 font-semibold text-gray-900">Hours Since Last Run</th>
+                                            <th class="text-left py-3 px-4 font-semibold text-gray-900">Status</th>
+                                            <th class="text-left py-3 px-4 font-semibold text-gray-900">Last Update</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="freshnessBody" class="divide-y divide-gray-100">
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -628,6 +733,146 @@ WHERE period = :current_period</pre>
                             <h3 class="text-lg font-semibold text-gray-900 mb-6">Dataset Cost Distribution</h3>
                             <div id="datasetCostChart" class="h-80"></div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Data Quality Tab -->
+                <div id="tab-quality" class="tab-content p-8 space-y-8">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="metric-card" data-tooltip="Percentage of datasets with complete data">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Data Completeness</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="dataCompleteness">96.8%</p>
+                                        <p class="text-sm text-green-600 mt-1">+1.2% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-green-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(CASE WHEN NULL_PCT < 5 THEN 1 ELSE 0 END) * 100
+FROM OBS_DATA_COMPLETENESS
+WHERE AS_OF_DATE >= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Number of data quality rule violations">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Rule Violations</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="ruleViolations">23</p>
+                                        <p class="text-sm text-red-600 mt-1">+8 vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-red-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 15.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT SUM(VIOLATIONS)
+FROM OBS_DATA_ACCURACY
+WHERE RUN_TS >= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Datasets with schema changes">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Schema Changes</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="schemaChanges">7</p>
+                                        <p class="text-sm text-orange-600 mt-1">This week</p>
+                                    </div>
+                                    <div class="p-3 bg-orange-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(DISTINCT TABLE_NAME)
+FROM OBS_SCHEMA_DRIFT
+WHERE CHANGE_DATE >= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Average data consistency score">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Consistency Score</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="consistencyScore">92.4%</p>
+                                        <p class="text-sm text-green-600 mt-1">+0.8% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-blue-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(CASE WHEN ORPHAN_ROWS = 0 THEN 100 ELSE 0 END)
+FROM OBS_DATA_CONSISTENCY
+WHERE AS_OF_DATE >= :start_date</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Orphan Rate and Coverage Anomalies (1x2) -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Orphan Rate by Check</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Referential integrity issues</span>
+                                </div>
+                            </div>
+                            <div id="orphanRateBar" class="h-80"></div>
+                        </div>
+
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Coverage Anomalies</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Row count anomalies by dataset</span>
+                                </div>
+                            </div>
+                            <div id="coverageAnomaliesChart" class="h-80"></div>
+                        </div>
+                    </div>
+
+                    <!-- Null Rates & PK Duplicates (1x1) -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Null Rates & PK Duplicates</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Data completeness issues</span>
+                            </div>
+                        </div>
+                        <div id="nullsAndDupesTable" class="h-80 overflow-y-auto"></div>
+                    </div>
+
+                    <!-- Schema Drift Log (1x1) -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Schema Drift Log</h3>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" id="schemaDriftFilter" placeholder="Filter by schema/table..." 
+                                       class="px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+                        <div id="schemaDriftLog" class="h-80 overflow-y-auto"></div>
                     </div>
                 </div>
 
