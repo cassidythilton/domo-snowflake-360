@@ -234,15 +234,36 @@ class SnowDomoDashboard {
         }
 
         // Data Quality mock datasets
-        // Coverage anomalies (ROWS_LOADED with z-score)
+        // Coverage anomalies (ROWS_LOADED with z-score) - more realistic anomaly patterns
         this.data.dataCoverage = [];
         const dqDatasets = ['USER_ACTIVITY', 'SALES_DATA', 'MARKETING_EVENTS'];
-        dates.forEach(date => {
-            dqDatasets.forEach(ds => {
-                const avg = 20000 + Math.random() * 50000;
-                const z = (Math.random() - 0.5) * 6;
-                const rows = Math.max(0, Math.round(avg + z * avg * 0.25));
-                this.data.dataCoverage.push({ RUN_DATE: date, DATASET: ds, ROWS_LOADED: rows, AVG_ROWS_30D: Math.round(avg), ZSCORE_ROWS_LOADED: z });
+        dates.forEach((date, dateIndex) => {
+            dqDatasets.forEach((ds, dsIndex) => {
+                // Base average varies by dataset
+                const baseAvg = [25000, 45000, 35000][dsIndex];
+                const avgRows30d = baseAvg + (Math.sin(dateIndex * 0.1) * 5000); // Seasonal variation
+                
+                // Most points are normal (z-score between -1.5 and 1.5)
+                let z = (Math.random() - 0.5) * 3; // Normal range
+                
+                // Inject specific anomalies (5% chance of strong anomaly)
+                if (Math.random() < 0.05) {
+                    z = (Math.random() > 0.5 ? 1 : -1) * (2.5 + Math.random() * 2); // Strong anomaly
+                } else if (Math.random() < 0.15) {
+                    z = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 0.5); // Mild anomaly
+                }
+                
+                // Calculate actual rows with some noise
+                const variation = z * (avgRows30d * 0.2);
+                const rows = Math.max(1000, Math.round(avgRows30d + variation + (Math.random() - 0.5) * 2000));
+                
+                this.data.dataCoverage.push({ 
+                    RUN_DATE: date, 
+                    DATASET: ds, 
+                    ROWS_LOADED: rows, 
+                    AVG_ROWS_30D: Math.round(avgRows30d), 
+                    ZSCORE_ROWS_LOADED: parseFloat(z.toFixed(2))
+                });
             });
         });
 
@@ -1893,26 +1914,114 @@ ORDER BY total_users DESC`,
     renderCoverageAnomaliesChart() {
         const container = document.querySelector('#coverageAnomaliesChart');
         if (!container) return;
+        
+        // Organize data by dataset and create normal vs anomaly series
         const byDataset = {};
         (this.data.dataCoverage || []).forEach(r => {
-            (byDataset[r.DATASET] ||= []).push({ x: r.RUN_DATE, y: r.ROWS_LOADED, z: r.ZSCORE_ROWS_LOADED, avg: r.AVG_ROWS_30D });
+            (byDataset[r.DATASET] ||= []).push({ 
+                x: r.RUN_DATE, 
+                y: r.ROWS_LOADED, 
+                z: r.ZSCORE_ROWS_LOADED, 
+                avg: r.AVG_ROWS_30D,
+                isAnomaly: Math.abs(r.ZSCORE_ROWS_LOADED) >= 2
+            });
         });
+        
         const datasets = Object.keys(byDataset).slice(0,3);
-        const series = datasets.map(ds => ({ name: ds, type: 'line', data: byDataset[ds].map(p => ({ x: p.x, y: p.y })) }));
-        const anomalies = (this.data.dataCoverage || []).filter(r => Math.abs(r.ZSCORE_ROWS_LOADED) >= 2).map(a => ({ x: a.RUN_DATE, y: a.ROWS_LOADED }));
-        series.push({ name: 'Anomalies', type: 'scatter', data: anomalies });
+        const series = [];
+        
+        // Create scatter series for each dataset - normal points
+        datasets.forEach((ds, index) => {
+            const normalPoints = byDataset[ds].filter(p => !p.isAnomaly);
+            const anomalyPoints = byDataset[ds].filter(p => p.isAnomaly);
+            
+            // Normal data points (small markers)
+            if (normalPoints.length > 0) {
+                series.push({
+                    name: ds,
+                    type: 'scatter',
+                    data: normalPoints.map(p => ({ x: p.x, y: p.y }))
+                });
+            }
+            
+            // Anomaly points (slightly larger, different style)
+            if (anomalyPoints.length > 0) {
+                series.push({
+                    name: `${ds} Anomalies`,
+                    type: 'scatter',
+                    data: anomalyPoints.map(p => ({ 
+                        x: p.x, 
+                        y: p.y,
+                        fillColor: '#ef4444',
+                        strokeColor: '#dc2626'
+                    }))
+                });
+            }
+        });
+        
         const chart = new ApexCharts(container, {
             series,
-            chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
-            stroke: { width: [2,2,2,0], curve: 'smooth' },
-            markers: { size: [0,0,0,6] },
-            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-            yaxis: { title: { text: 'Rows Loaded', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-            colors: ['#259EDC', '#56CCF2', '#A62A92', '#ef4444'],
+            chart: { 
+                type: 'scatter', 
+                height: 320, 
+                fontFamily: 'Inter, sans-serif', 
+                toolbar: { show: false },
+                zoom: { enabled: true, type: 'xy' }
+            },
+            markers: { 
+                size: [3, 3, 3, 5, 5, 5], // Small for normal, slightly larger for anomalies
+                strokeWidth: [0, 0, 0, 1, 1, 1],
+                hover: { size: [5, 5, 5, 7, 7, 7] }
+            },
+            xaxis: { 
+                type: 'datetime', 
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '11px' },
+                    formatter: function(val) {
+                        return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }
+                }
+            },
+            yaxis: { 
+                title: { text: 'Rows Loaded', style: { color: '#6b7280' } }, 
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '11px' },
+                    formatter: function(val) {
+                        return val >= 1000 ? (val/1000).toFixed(1) + 'K' : val.toFixed(0);
+                    }
+                }
+            },
+            colors: ['#259EDC', '#56CCF2', '#A62A92', '#ef4444', '#ef4444', '#ef4444'],
             dataLabels: { enabled: false },
-            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
-            legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } }
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: '#e5e7eb',
+                xaxis: { lines: { show: true } },
+                yaxis: { lines: { show: true } }
+            },
+            legend: { 
+                position: 'top', 
+                horizontalAlign: 'right', 
+                labels: { colors: '#374151' },
+                markers: { width: 8, height: 8 }
+            },
+            tooltip: {
+                custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                    const data = w.globals.initialSeries[seriesIndex].data[dataPointIndex];
+                    const isAnomaly = w.globals.seriesNames[seriesIndex].includes('Anomalies');
+                    const date = new Date(data.x).toLocaleDateString();
+                    const value = data.y.toLocaleString();
+                    
+                    return `<div class="px-3 py-2 bg-white border rounded shadow-lg">
+                        <div class="font-semibold">${w.globals.seriesNames[seriesIndex]}</div>
+                        <div class="text-sm text-gray-600">${date}</div>
+                        <div class="text-sm">Rows: ${value}</div>
+                        ${isAnomaly ? '<div class="text-xs text-red-600 font-medium">⚠️ Anomaly Detected</div>' : ''}
+                    </div>`;
+                }
+            }
         });
+        
         chart.render();
         this.charts.coverageAnomaliesChart = chart;
     }
