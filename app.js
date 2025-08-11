@@ -1,0 +1,2920 @@
+// Snow-Domo 360 Dashboard JavaScript
+
+class SnowDomoDashboard {
+    constructor() {
+        this.isLiveMode = false;
+        this.isDarkMode = false;
+        this.currentDateRange = 30;
+        this.charts = {};
+        this.data = {};
+        this.alerts = [];
+        this.querySwarmChart = null;
+        this.monacoEditor = null;
+        this.queryRewriteResults = [];
+        this.filteredQueries = [];
+        this.displayedQueries = [];
+        this.queriesPerPage = 15;
+        this.currentQueryPage = 1;
+        
+        // Dataset aliases for live data
+        this.datasetAliases = {
+            'OBS_OBJECT_CREDIT_COST': 'OBSOBJECTCREDITCOST',
+            'OBS_DATAFLOW_RUNS': 'OBSDATAFLOWRUNS',
+            'OBS_DATASET_CREDIT_COST': 'OBSDATASETCREDITCOST',
+            'OBS_SNOWFLAKE_WAU': 'OBSSNOWFLAKEWAU',
+            'OBS_DOMO_API_ZSCORE': 'OBSDOMOAPIZSCORE',
+            'OBS_DOMO_DAILY_BYTES': 'OBSDOMODAILYBYTES',
+            'OBS_DOMO_DATA_FRESHNESS': 'OBSDOMODATAFRESHNESS',
+            'OBS_DOMO_CONNECTOR_HEALTH': 'OBSDOMOCONNECTORHEALTH',
+            'OBS_DOMO_CONNECTOR_SLA': 'OBSDOMOCONNECTORSLA',
+            'OBS_DOMO_CONNECTOR_RUNS': 'OBSDOMOCONNECTORRUNS',
+            'OBS_WAREHOUSE_EVENTS': 'OBSWAREHOUSEEVENTS',
+            'OBS_QUERY_FAILURE_RATE': 'OBSQUERYFAILURERATE',
+            'OBS_QUERY_PERFORMANCE': 'OBSQUERYPERFORMANCE',
+            'OBS_IDLE_ACTIVE_RATIO': 'OBSIDLEACTIVERATIO',
+            'OBS_CREDITS_BY_WAREHOUSE': 'OBSCREDITSBYWAREHOUSE',
+            'OBS_COST_PER_CREDIT': 'OBSCOSTPERCREDIT',
+            'OBS_QUERY_HISTORY_LTD': 'OBSQUERYHISTORYLTD',
+            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS'
+        };
+
+        this.init();
+    }
+
+    init() {
+        this.setupEventListeners();
+        this.generateMockData();
+        this.generateQueryRewriteData();
+        this.renderDashboard();
+        this.generateAlerts();
+        this.setupTooltips();
+        this.initializeMonacoEditor();
+        this.initializeTheme();
+    }
+
+    // Initialize theme from localStorage or default to light
+    initializeTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        this.isDarkMode = savedTheme === 'dark';
+        this.applyTheme();
+    }
+
+    // Apply theme to document
+    applyTheme() {
+        if (this.isDarkMode) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        
+        // Update toggle button
+        const themeToggle = document.getElementById('themeToggle');
+        const icon = themeToggle.querySelector('.theme-toggle-icon');
+        const text = themeToggle.querySelector('.theme-toggle-text');
+        
+        if (this.isDarkMode) {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>';
+            text.textContent = 'Light Mode';
+        } else {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
+            text.textContent = 'Dark Mode';
+        }
+        
+        localStorage.setItem('theme', this.isDarkMode ? 'dark' : 'light');
+    }
+
+    // Toggle theme
+    toggleTheme() {
+        this.isDarkMode = !this.isDarkMode;
+        this.applyTheme();
+        
+        // Re-render charts to apply theme colors
+        setTimeout(() => {
+            this.renderDashboard();
+        }, 100);
+    }
+
+    // SQL Auto-formatting function
+    formatSQL(sql) {
+        if (!sql) return '';
+        
+        // SQL keywords to uppercase
+        const keywords = [
+            'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'OUTER', 'LEFT', 'RIGHT', 'FULL',
+            'ON', 'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'IS', 'NULL',
+            'GROUP', 'BY', 'HAVING', 'ORDER', 'ASC', 'DESC', 'LIMIT', 'OFFSET',
+            'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE',
+            'ALTER', 'DROP', 'INDEX', 'VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER',
+            'UNION', 'ALL', 'DISTINCT', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+            'IF', 'IFNULL', 'COALESCE', 'CAST', 'CONVERT', 'SUBSTRING', 'TRIM',
+            'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DATE', 'TIME', 'TIMESTAMP',
+            'WITH', 'MATERIALIZED', 'CTE', 'RECURSIVE'
+        ];
+        
+        let formatted = sql;
+        
+        // Apply keyword formatting
+        keywords.forEach(keyword => {
+            const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+            formatted = formatted.replace(regex, keyword.toUpperCase());
+        });
+        
+        // Clean up whitespace and apply indentation
+        formatted = formatted
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .replace(/,\s*/g, ',\n    ') // Comma formatting
+            .replace(/\bFROM\b/g, '\nFROM')
+            .replace(/\bWHERE\b/g, '\nWHERE')
+            .replace(/\bAND\b/g, '\n    AND')
+            .replace(/\bOR\b/g, '\n    OR')
+            .replace(/\bJOIN\b/g, '\nJOIN')
+            .replace(/\bLEFT JOIN\b/g, '\nLEFT JOIN')
+            .replace(/\bRIGHT JOIN\b/g, '\nRIGHT JOIN')
+            .replace(/\bINNER JOIN\b/g, '\nINNER JOIN')
+            .replace(/\bOUTER JOIN\b/g, '\nOUTER JOIN')
+            .replace(/\bGROUP BY\b/g, '\nGROUP BY')
+            .replace(/\bORDER BY\b/g, '\nORDER BY')
+            .replace(/\bHAVING\b/g, '\nHAVING')
+            .replace(/\bWITH\b/g, '\nWITH')
+            .trim();
+        
+        return formatted;
+    }
+
+    // Helper method for exponential distribution
+    exponentialRandom() {
+        return -Math.log(1 - Math.random());
+    }
+
+    setupEventListeners() {
+        // Tab switching with navigation
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tab = e.currentTarget.dataset.tab;
+                this.switchTab(tab);
+            });
+        });
+
+        // Data mode toggle
+        document.getElementById('dataToggle').addEventListener('click', () => {
+            this.toggleDataMode();
+        });
+
+        // Theme toggle
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            this.toggleTheme();
+        });
+
+        // Date range change
+        document.getElementById('dateRange').addEventListener('change', (e) => {
+            this.currentDateRange = parseInt(e.target.value);
+            this.refreshData();
+        });
+
+        // Refresh button
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            this.refreshData();
+        });
+
+        // Sidebar toggle
+        document.getElementById('closeSidebar').addEventListener('click', () => {
+            this.toggleSidebar();
+        });
+
+        // Show more alerts
+        document.getElementById('showMoreAlerts').addEventListener('click', () => {
+            this.showMoreAlerts();
+        });
+
+        // Modal handling
+        document.getElementById('closeModal').addEventListener('click', () => {
+            this.closeModal();
+        });
+
+        document.getElementById('modalBackdrop').addEventListener('click', () => {
+            this.closeModal();
+        });
+
+        // Escape key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeModal();
+            }
+        });
+
+        // Query optimization filters
+        document.getElementById('actionFilter').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('improvementFilter').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('sortBy').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('searchQueries').addEventListener('input', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('loadMoreQueries').addEventListener('click', () => {
+            this.loadMoreQueries();
+        });
+    }
+
+    generateMockData() {
+        const endDate = new Date();
+        const startDate = new Date(endDate.getTime() - (this.currentDateRange * 24 * 60 * 60 * 1000));
+
+        // Generate date array
+        const dates = [];
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            dates.push(new Date(d));
+        }
+
+        // OBS_COST_PER_CREDIT
+        this.data.costPerCredit = [];
+        dates.forEach(date => {
+            ['WAREHOUSE_METERING', 'AI_SERVICES', 'SNOWPARK_CONTAINER_SERVICES'].forEach(serviceType => {
+                this.data.costPerCredit.push({
+                    USAGE_DATE: date,
+                    SERVICE_TYPE: serviceType,
+                    CREDITS: Math.random() * 50 + 10,
+                    SPEND_USD: Math.random() * 50 + 10
+                });
+            });
+        });
+
+        // OBS_CREDITS_BY_WAREHOUSE
+        this.data.creditsByWarehouse = [];
+        const warehouses = ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH', 'AD4_DEMO_SMALL_INDEX'];
+        dates.forEach(date => {
+            warehouses.forEach(warehouse => {
+                if (Math.random() > 0.3) { // Some warehouses don't run every day
+                    this.data.creditsByWarehouse.push({
+                        WAREHOUSE_NAME: warehouse,
+                        USAGE_DATE: date,
+                        CREDITS: Math.random() * 10 + 1,
+                        SPEND_USD: Math.random() * 10 + 1
+                    });
+                }
+            });
+        });
+
+        // OBS_IDLE_ACTIVE_RATIO
+        this.data.idleActiveRatio = warehouses.map(warehouse => ({
+            WAREHOUSE_NAME: warehouse,
+            AVG_RUNNING_LOAD: Math.random() * 0.1,
+            AVG_QUEUED_LOAD: Math.random() * 0.01,
+            ACTIVE_PCT: Math.random() * 0.3 + 0.7,
+            QUEUED_PCT: Math.random() * 0.1
+        }));
+
+        // OBS_QUERY_PERFORMANCE
+        this.data.queryPerformance = dates.map(date => ({
+            USAGE_DATE: date,
+            P95_EXEC_SEC: Math.random() * 1 + 0.2,
+            AVG_EXEC_SEC: Math.random() * 0.1 + 0.02
+        }));
+
+        // OBS_QUERY_FAILURE_RATE
+        this.data.queryFailureRate = dates.map(date => {
+            const totalQueries = Math.floor(Math.random() * 20000) + 30000;
+            const failedQueries = Math.floor(totalQueries * (Math.random() * 0.02 + 0.005));
+            return {
+                USAGE_DATE: date,
+                FAILED_QUERIES: failedQueries,
+                TOTAL_QUERIES: totalQueries,
+                FAILURE_RATE: failedQueries / totalQueries
+            };
+        });
+
+        // OBS_WAREHOUSE_EVENTS
+        this.data.warehouseEvents = [];
+        dates.forEach(date => {
+            warehouses.forEach(warehouse => {
+                const eventsCount = Math.floor(Math.random() * 5);
+                for (let i = 0; i < eventsCount; i++) {
+                    const eventTime = new Date(date.getTime() + Math.random() * 24 * 60 * 60 * 1000);
+                    this.data.warehouseEvents.push({
+                        EVENT_TS: eventTime,
+                        WAREHOUSE_NAME: warehouse,
+                        EVENT_NAME: ['SUSPEND_WAREHOUSE', 'RESUME_WAREHOUSE', 'RESIZE_WAREHOUSE'][Math.floor(Math.random() * 3)],
+                        EVENT_REASON: ['WAREHOUSE_AUTOSUSPEND', 'WAREHOUSE_AUTORESUME', 'USER_REQUEST'][Math.floor(Math.random() * 3)],
+                        EVENT_STATE: 'STARTED'
+                    });
+                }
+            });
+        });
+
+        // OBS_DOMO_CONNECTOR_HEALTH
+        const connectors = ['Raidar Accounts', 'SALESFORCE.ACCOUNTS.WILDCAT', 'rootCauseRecord', 'forecastRecord'];
+        this.data.connectorHealth = [];
+        dates.forEach(date => {
+            connectors.forEach(connector => {
+                this.data.connectorHealth.push({
+                    RUN_DATE: date,
+                    CONNECTOR: connector,
+                    SUCCESS_PCT: Math.random() * 0.1 + 0.9,
+                    SLA_BREACHES: Math.floor(Math.random() * 10),
+                    AVG_RUNTIME_SEC: Math.random() * 3600 + 30
+                });
+            });
+        });
+
+        // OBS_DOMO_DATA_FRESHNESS
+        this.data.dataFreshness = [
+            { DATASET: 'SALESFORCE.ACCOUNTS.WILDCAT', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 48) },
+            { DATASET: 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 24) },
+            { DATASET: 'Raidar Accounts', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 72) },
+            { DATASET: 'forecastRecord', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 400) },
+            { DATASET: 'rootCauseRecord', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 400) }
+        ];
+
+        // OBS_DATASET_CREDIT_COST
+        this.data.datasetCreditCost = [
+            { DATASET_NAME: 'HHS_NPI_Registry', CREDITS: 0.00718, COST_USD: 0.00718 },
+            { DATASET_NAME: 'Transaction Fraud Recommendation', CREDITS: 0.03666, COST_USD: 0.03666 },
+            { DATASET_NAME: 'AI Chat Sessions', CREDITS: 0.00537, COST_USD: 0.00537 },
+            { DATASET_NAME: 'AI Services', CREDITS: 0.013536, COST_USD: 0.013536 },
+            { DATASET_NAME: 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', CREDITS: 1.354891, COST_USD: 1.354891 }
+        ].map(item => ({
+            ...item,
+            CREDITS: item.CREDITS * (0.5 + Math.random()),
+            COST_USD: item.COST_USD * (0.5 + Math.random())
+        }));
+
+        // OBS_SNOWFLAKE_WAU
+        this.data.snowflakeWAU = [
+            { ISO_WEEK: 'I25Y-IW30', WAU: 115 },
+            { ISO_WEEK: 'I25Y-IW31', WAU: 119 },
+            { ISO_WEEK: 'I25Y-IW32', WAU: 123 }
+        ];
+
+        // OBS_DOMO_DAILY_BYTES
+        this.data.dailyBytes = dates.map(date => ({
+            RUN_DATE: date,
+            AVG_BYTES_INSERTED: Math.random() * 500000 + 800000
+        }));
+
+        // OBS_DOMO_API_ZSCORE
+        this.data.apiZscore = dates.map(date => ({
+            RUN_DATE: date,
+            API_CALLS: Math.random() * 1000 + 2500,
+            ZSCORE: (Math.random() - 0.5) * 6
+        }));
+
+        // OBS_DOMO_CONNECTOR_RUNS
+        this.data.connectorRuns = [];
+        dates.forEach(date => {
+            connectors.forEach(connector => {
+                const runsCount = Math.floor(Math.random() * 5) + 1;
+                for (let i = 0; i < runsCount; i++) {
+                    this.data.connectorRuns.push({
+                        'Data Source Name': connector,
+                        Status: Math.random() > 0.05 ? 'SUCCESS' : 'FAILURE',
+                        'Updated Rows': Math.floor(Math.random() * 10000) + 100,
+                        'Bytes Inserted': Math.floor(Math.random() * 1000000) + 10000,
+                        'Total API Calls': Math.floor(Math.random() * 50) + 5,
+                        'Created At': date,
+                        'Run Time': `00:0${Math.floor(Math.random() * 6)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`
+                    });
+                }
+            });
+        });
+
+        // OBS_QUERY_HISTORY_LTD
+        this.data.queryHistory = [];
+        const queryTypes = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'ALTER_SESSION', 'CREATE'];
+        const databases = ['DOMO', 'COBRA_DEMO_DB', 'TEST_DB', 'INTEGRATIONTESTS', 'CLOUD_DATATRANSFORM_DEV3'];
+        const queryWarehouses = ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH'];
+        
+        for (let i = 0; i < 700; i++) {
+            const queryId = `01bb${Math.random().toString(36).substr(2, 4)}-0613-${Math.random().toString(36).substr(2, 4)}-0000-ad0d3e${Math.random().toString(36).substr(2, 6)}`;
+            const queryType = queryTypes[Math.floor(Math.random() * queryTypes.length)];
+            const database = databases[Math.floor(Math.random() * databases.length)];
+            const warehouse = queryWarehouses[Math.floor(Math.random() * queryWarehouses.length)];
+            
+            let queryText = '';
+            switch (queryType) {
+                case 'SELECT':
+                    queryText = `SELECT * FROM "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}"`;
+                    break;
+                case 'INSERT':
+                    queryText = `INSERT INTO "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" VALUES (...)`;
+                    break;
+                case 'UPDATE':
+                    queryText = `UPDATE "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" SET column = value`;
+                    break;
+                case 'DELETE':
+                    queryText = `DELETE FROM "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" WHERE condition`;
+                    break;
+                case 'ALTER_SESSION':
+                    queryText = 'ALTER SESSION SET QUERY_TAG = \'{"source":"domo"}\'';
+                    break;
+                case 'CREATE':
+                    queryText = `CREATE TABLE "${database}"."SCHEMA"."NEW_TABLE_${Math.floor(Math.random() * 100)}" AS SELECT...`;
+                    break;
+            }
+
+            this.data.queryHistory.push({
+                QUERY_ID: queryId,
+                QUERY_TEXT: queryText,
+                DATABASE_NAME: database,
+                QUERY_TYPE: queryType,
+                WAREHOUSE_NAME: warehouse,
+                QUERY_TAG: Math.random() > 0.7 ? `{"datasourceId":"${Math.random().toString(36)}","source":"domo","userId":"${Math.floor(Math.random() * 1000000000)}"}` : null,
+                TOTAL_ELAPSED_TIME: Math.floor(this.exponentialRandom() * 5000) + 10 // Exponential distribution for realistic query times
+            });
+        }
+
+        // Sort by elapsed time for better visualization
+        this.data.queryHistory.sort((a, b) => b.TOTAL_ELAPSED_TIME - a.TOTAL_ELAPSED_TIME);
+    }
+
+    generateQueryRewriteData() {
+        const queryTemplates = [
+            {
+                orig: `select 
+    table_catalog,
+    table_schema,
+    table_name,
+    row_count,
+    to_timestamp(convert_timezone('utc', last_altered)) as last_altered,
+    table_type
+from "datashare_linkup_aws_us_east_1_linkup_dca9bb60".information_schema.tables
+where 
+    (
+        is_transient = 'no'
+        or is_transient is null
+    )
+    and table_type in ('base table', 'view', 'materialized view')
+    and table_schema = 'linkup'
+    and table_name in (
+        'core_ticker_analytics', 'pit_company_reference', 'onet_taxonomy_2019',
+        'core_company_analytics', 'job_descriptions', 'job_records', 'company_ticker_reference',
+        'company_scrape_log'
+    )`,
+                rewrite: `SELECT 
+    table_catalog,
+    table_schema,
+    table_name,
+    row_count,
+    TO_TIMESTAMP(CONVERT_TIMEZONE('UTC', last_altered)) AS last_altered,
+    table_type
+FROM "datashare_linkup_aws_us_east_1_linkup_dca9bb60".information_schema.tables
+WHERE (is_transient = 'NO' OR is_transient IS NULL)
+    AND table_type IN ('BASE TABLE', 'VIEW', 'MATERIALIZED VIEW')
+    AND table_schema = 'LINKUP'
+    AND table_name IN (
+        'CORE_TICKER_ANALYTICS',
+        'PIT_COMPANY_REFERENCE',
+        'ONET_TAXONOMY_2019',
+        'CORE_COMPANY_ANALYTICS',
+        'JOB_DESCRIPTIONS',
+        'JOB_RECORDS',
+        'COMPANY_TICKER_REFERENCE',
+        'COMPANY_SCRAPE_LOG'
+    )
+WITH MATERIALIZED VIEW`,
+                rationale: "Optimized query structure with proper formatting, uppercase keywords, and added MATERIALIZED VIEW hint for frequently accessed metadata queries. Improved readability and performance."
+            },
+            {
+                orig: `select 
+    date_trunc(?, convert_timezone(?, start_time)) as start_time,
+    entity_id,
+    name,
+    service_type,
+    sum(credits_used) as credits_used,
+    sum(credits_used_compute) as credits_compute,
+    sum(credits_used_cloud_services) as credits_cloud
+from 
+    snowflake.account_usage.metering_history
+where
+    start_time >= convert_timezone(?, ?, to_timestamp_ltz(?, 'auto'))
+    and start_time < convert_timezone(?, ?, to_timestamp_ltz(?, 'auto'))
+group by 
+    1, 2, 3, 4`,
+                rewrite: `SELECT 
+    DATE_TRUNC(?, CONVERT_TIMEZONE(?, start_time)) AS start_time,
+    entity_id,
+    name,
+    service_type,
+    SUM(credits_used) AS credits_used,
+    SUM(credits_used_compute) AS credits_compute,
+    SUM(credits_used_cloud_services) AS credits_cloud
+FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_HISTORY
+WHERE start_time >= CONVERT_TIMEZONE(?, ?, TO_TIMESTAMP_LTZ(?, 'AUTO'))
+    AND start_time < CONVERT_TIMEZONE(?, ?, TO_TIMESTAMP_LTZ(?, 'AUTO'))
+GROUP BY 1, 2, 3, 4
+WITH RESULT_CACHE`,
+                rationale: "Enhanced with proper SQL formatting, uppercase keywords, and result caching for frequently accessed account usage data. Improved query plan efficiency and readability."
+            },
+            {
+                orig: `select 
+    *
+from 
+    "datashare_linkup_aws_us_east_1_linkup_dca9bb60".public.diamonds
+where 
+    price > 5000
+    and carat > 1.0
+    and cut = 'premium'
+order by price desc
+limit 100`,
+                rewrite: `SELECT 
+    carat,
+    cut,
+    color,
+    clarity,
+    depth,
+    table_pct,
+    price,
+    x,
+    y,
+    z
+FROM "datashare_linkup_aws_us_east_1_linkup_dca9bb60".public.diamonds
+WHERE price > 5000 
+    AND carat > 1.0 
+    AND cut = 'PREMIUM'
+ORDER BY price DESC
+LIMIT 100`,
+                rationale: "Replaced SELECT * with explicit column selection to reduce data transfer and improve performance. Added proper formatting with uppercase keywords and optimized WHERE clause structure."
+            },
+            {
+                orig: `select customer_id, order_date, total_amount from orders where order_date between '2024-01-01' and '2024-12-31' and status in ('completed', 'shipped') order by order_date`,
+                rewrite: `SELECT 
+    customer_id,
+    order_date,
+    total_amount
+FROM orders
+WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31'
+    AND status IN ('COMPLETED', 'SHIPPED')
+ORDER BY order_date
+WITH INDEX_HINT(idx_order_date_status)`,
+                rationale: "Improved formatting with proper indentation and uppercase keywords. Added index hint for better performance on date range and status filtering."
+            },
+            {
+                orig: `select count(*) as total_users, avg(age) as avg_age from users where created_date > dateadd(month, -6, current_date()) and country in ('usa', 'canada') group by country`,
+                rewrite: `SELECT 
+    country,
+    COUNT(*) AS total_users,
+    AVG(age) AS avg_age,
+    MEDIAN(age) AS median_age
+FROM users
+WHERE created_date > DATEADD(MONTH, -6, CURRENT_DATE())
+    AND country IN ('USA', 'CANADA')
+GROUP BY country
+ORDER BY total_users DESC`,
+                rationale: "Enhanced with better column organization, added median calculation for more comprehensive statistics, and proper sorting. Improved readability with uppercase keywords."
+            }
+        ];
+
+        this.queryRewriteResults = [];
+        
+        for (let i = 0; i < 47; i++) {
+            const template = queryTemplates[Math.floor(Math.random() * queryTemplates.length)];
+            const queryId = `01bb${Math.random().toString(36).substr(2, 4)}-0613-${Math.random().toString(36).substr(2, 4)}-0000-ad0d3e${Math.random().toString(36).substr(2, 6)}`;
+            
+            // Generate realistic performance metrics
+            const baseMs = Math.floor(Math.random() * 15000) + 500; // 500ms to 15.5s
+            const improvementFactor = Math.random() * 0.7 + 0.1; // 10% to 80% improvement
+            const testMs = Math.floor(baseMs * (1 - improvementFactor));
+            const pctMs = parseFloat(((baseMs - testMs) / baseMs * 100).toFixed(1));
+            
+            const baseBytes = Math.floor(Math.random() * 500000000) + 10000; // 10KB to 500MB
+            const bytesImprovementFactor = Math.random() * 0.6 + 0.1; // 10% to 70% improvement
+            const testBytes = Math.floor(baseBytes * (1 - bytesImprovementFactor));
+            const pctBytes = parseFloat(((baseBytes - testBytes) / baseBytes * 100).toFixed(1));
+            
+            // Generate credits and savings
+            const testCreditsCloud = parseFloat((Math.random() * 2 + 0.1).toFixed(6));
+            const estUsdSavings = parseFloat((testCreditsCloud * pctMs / 100).toFixed(2));
+            
+            // Determine action based on improvement
+            let action;
+            if (pctMs >= 25) action = 'ADOPT';
+            else if (pctMs >= 5) action = 'BENCH_TEST';
+            else action = 'IGNORE';
+            
+            const runDate = new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000); // Last 7 days
+            
+            this.queryRewriteResults.push({
+                QUERY_ID: queryId,
+                ORIG_SQL: template.orig,
+                REWRITE_SQL: template.rewrite,
+                BASE_MS: baseMs,
+                TEST_MS: testMs,
+                PCT_MS: pctMs,
+                BASE_BYTES: baseBytes,
+                TEST_BYTES: testBytes,
+                PCT_BYTES: pctBytes,
+                SCORE: parseFloat((pctMs * 0.7 + pctBytes * 0.3).toFixed(1)),
+                ACTION: action,
+                RUN_DTS: runDate.toISOString(),
+                START_TIME: runDate.toISOString(),
+                WAREHOUSE_NAME: ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH'][Math.floor(Math.random() * 3)],
+                USER_NAME: ['analyst@domo.com', 'developer@domo.com', 'admin@domo.com'][Math.floor(Math.random() * 3)],
+                BASE_ELAPSED_MS: baseMs,
+                BASE_BYTES_SCANNED: baseBytes,
+                LLM_RATIONALE: template.rationale,
+                LLM_EST_ELAPSED_PCT: Math.floor(pctMs),
+                LLM_EST_BYTES_PCT: Math.floor(pctBytes),
+                LLM_RISKS: "Low risk optimization. No functional changes to query logic. Thoroughly tested for compatibility.",
+                TEST_ELAPSED_MS: testMs,
+                TEST_BYTES_SCANNED: testBytes,
+                TEST_CREDITS_CLOUD: testCreditsCloud,
+                PCT_ELAPSED_IMPR: pctMs,
+                PCT_BYTES_IMPR: pctBytes,
+                USD_PER_CREDIT: 1,
+                EST_USD_SAVINGS: estUsdSavings,
+                DECISION: action === 'ADOPT' ? 'RECOMMENDED' : action === 'BENCH_TEST' ? 'EVALUATE' : 'SKIP',
+                ERROR_MSG: null,
+                PCT_CREDITS_IMPR: pctMs
+            });
+        }
+        
+        // Sort by improvement descending
+        this.queryRewriteResults.sort((a, b) => b.PCT_MS - a.PCT_MS);
+        this.filteredQueries = [...this.queryRewriteResults];
+    }
+
+    async loadLiveData() {
+        if (typeof domo === 'undefined') {
+            console.warn('Domo SDK not available');
+            return;
+        }
+
+        try {
+            const promises = Object.entries(this.datasetAliases).map(async ([key, alias]) => {
+                try {
+                    const rows = await domo.get(`/data/v1/${alias}`);
+                    console.log(`Fetched ${rows.length} rows for ${key}`);
+                    return [key, rows];
+                } catch (error) {
+                    console.error(`Error fetching ${key}:`, error);
+                    return [key, []];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            
+            results.forEach(([key, data]) => {
+                switch(key) {
+                    case 'OBS_COST_PER_CREDIT':
+                        this.data.costPerCredit = data;
+                        break;
+                    case 'OBS_CREDITS_BY_WAREHOUSE':
+                        this.data.creditsByWarehouse = data;
+                        break;
+                    case 'OBS_IDLE_ACTIVE_RATIO':
+                        this.data.idleActiveRatio = data;
+                        break;
+                    case 'OBS_QUERY_PERFORMANCE':
+                        this.data.queryPerformance = data;
+                        break;
+                    case 'OBS_QUERY_FAILURE_RATE':
+                        this.data.queryFailureRate = data;
+                        break;
+                    case 'OBS_WAREHOUSE_EVENTS':
+                        this.data.warehouseEvents = data;
+                        break;
+                    case 'OBS_DOMO_CONNECTOR_HEALTH':
+                        this.data.connectorHealth = data;
+                        break;
+                    case 'OBS_DOMO_DATA_FRESHNESS':
+                        this.data.dataFreshness = data;
+                        break;
+                    case 'OBS_DATASET_CREDIT_COST':
+                        this.data.datasetCreditCost = data;
+                        break;
+                    case 'OBS_SNOWFLAKE_WAU':
+                        this.data.snowflakeWAU = data;
+                        break;
+                    case 'OBS_DOMO_DAILY_BYTES':
+                        this.data.dailyBytes = data;
+                        break;
+                    case 'OBS_DOMO_API_ZSCORE':
+                        this.data.apiZscore = data;
+                        break;
+                    case 'OBS_DOMO_CONNECTOR_RUNS':
+                        this.data.connectorRuns = data;
+                        break;
+                    case 'OBS_QUERY_HISTORY_LTD':
+                        this.data.queryHistory = data;
+                        break;
+                    case 'QUERY_REWRITE_RESULTS':
+                        this.queryRewriteResults = data;
+                        this.filteredQueries = [...data];
+                        break;
+                }
+            });
+
+        } catch (error) {
+            console.error('Error loading live data:', error);
+        }
+    }
+
+    async toggleDataMode() {
+        const button = document.getElementById('dataToggle');
+        const modeIndicator = document.getElementById('dataMode');
+        button.classList.add('loading');
+        
+        if (this.isLiveMode) {
+            this.isLiveMode = false;
+            button.textContent = 'Switch to Live';
+            modeIndicator.textContent = 'Mock Data';
+            modeIndicator.className = 'px-2 py-1 rounded-full text-xs font-medium bg-orange-500 text-white';
+            this.generateMockData();
+            this.generateQueryRewriteData();
+        } else {
+            this.isLiveMode = true;
+            button.textContent = 'Switch to Mock';
+            modeIndicator.textContent = 'Live Data';
+            modeIndicator.className = 'px-2 py-1 rounded-full text-xs font-medium bg-green-500 text-white';
+            await this.loadLiveData();
+        }
+        
+        button.classList.remove('loading');
+        this.renderDashboard();
+        this.generateAlerts();
+        this.filterQueries();
+    }
+
+    async refreshData() {
+        if (this.isLiveMode) {
+            await this.loadLiveData();
+        } else {
+            this.generateMockData();
+            this.generateQueryRewriteData();
+        }
+        this.renderDashboard();
+        this.generateAlerts();
+        this.filterQueries();
+    }
+
+    switchTab(tabName) {
+        // Update navigation buttons
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+
+        // Update page title and description
+        const titles = {
+            'cost': {
+                title: 'Cost & Credits',
+                description: 'Monitor spend patterns and resource utilization'
+            },
+            'performance': {
+                title: 'Performance & Reliability',
+                description: 'Track query performance and system reliability metrics'
+            },
+            'pipeline': {
+                title: 'Pipeline Health',
+                description: 'Monitor connector performance and data freshness'
+            },
+            'adoption': {
+                title: 'Adoption & Utilization',
+                description: 'Analyze user engagement and platform adoption'
+            },
+            'optimization': {
+                title: 'AI Query Optimization',
+                description: 'Leverage Claude 4 Sonnet to optimize query performance and reduce costs'
+            }
+        };
+
+        const pageTitle = document.getElementById('pageTitle');
+        const pageDescription = pageTitle.nextElementSibling;
+        
+        if (titles[tabName]) {
+            pageTitle.textContent = titles[tabName].title;
+            pageDescription.textContent = titles[tabName].description;
+        }
+
+        // Render charts for the active tab
+        this.renderTabCharts(tabName);
+    }
+
+    // Initialize Monaco Editor
+    async initializeMonacoEditor() {
+        if (typeof require !== 'undefined') {
+            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs' } });
+            
+            require(['vs/editor/editor.main'], () => {
+                // Monaco is loaded and ready
+                console.log('Monaco Editor loaded successfully');
+            });
+        }
+    }
+
+    // Create Monaco Editor instance with professional configuration
+    createMonacoEditor(container, value, isReadOnly = false) {
+        if (typeof monaco === 'undefined') {
+            // Fallback to simple textarea if Monaco isn't available
+            const textarea = document.createElement('textarea');
+            textarea.value = this.formatSQL(value);
+            textarea.readOnly = isReadOnly;
+            textarea.className = 'w-full h-full font-mono border-0 resize-none focus:outline-none';
+            textarea.style.backgroundColor = isReadOnly ? '#f9fafb' : '#22262e';
+            textarea.style.color = isReadOnly ? '#374151' : '#d4d4d4';
+            textarea.style.fontSize = '10px';
+            textarea.style.lineHeight = '1.3';
+            textarea.style.padding = '12px';
+            textarea.style.height = '280px';
+            textarea.style.fontFamily = 'JetBrains Mono, Fira Code, Monaco, Consolas, monospace';
+            container.appendChild(textarea);
+            return {
+                getValue: () => textarea.value,
+                setValue: (val) => { textarea.value = this.formatSQL(val); },
+                dispose: () => { textarea.remove(); },
+                getAction: (id) => ({ run: () => {} })
+            };
+        }
+
+        const formattedValue = this.formatSQL(value);
+        
+        // Create custom theme for the editor
+        monaco.editor.defineTheme('customDark', {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+                { token: 'keyword.sql', foreground: 'd8c462' },
+                { token: 'string.sql', foreground: '7ebc65' },
+                { token: 'comment', foreground: '6b7280' },
+                { token: 'number', foreground: 'd02666' },
+                { token: 'operator.sql', foreground: '00bda3' },
+                { token: 'identifier', foreground: 'ffffff' },
+                { token: 'delimiter', foreground: '9841b6' }
+            ],
+            colors: {
+                'editor.background': '#22262e',
+                'editor.foreground': '#ffffff',
+                'editor.lineHighlightBackground': '#d8c46205',
+                'editor.selectionBackground': '#9841b620',
+                'editorCursor.foreground': '#d8c462',
+                'editorLineNumber.foreground': '#6b7280',
+                'editorLineNumber.activeForeground': '#d8c462'
+            }
+        });
+        
+        const editor = monaco.editor.create(container, {
+            value: formattedValue,
+            language: 'sql',
+            theme: isReadOnly ? (this.isDarkMode ? 'vs-dark' : 'vs') : 'customDark',
+            readOnly: isReadOnly,
+            minimap: { 
+                enabled: false
+            },
+            scrollBeyondLastLine: false,
+            wordWrap: 'on',
+            lineNumbers: 'on',
+            fontSize: 10,
+            lineHeight: 13,
+            fontFamily: 'JetBrains Mono, Fira Code, Monaco, Consolas, monospace',
+            fontLigatures: true,
+            cursorBlinking: 'smooth',
+            cursorSmoothCaretAnimation: true,
+            smoothScrolling: true,
+            folding: true,
+            foldingStrategy: 'indentation',
+            showFoldingControls: 'always',
+            unfoldOnClickAfterEndOfLine: true,
+            contextmenu: true,
+            mouseWheelZoom: true,
+            quickSuggestions: {
+                other: true,
+                comments: false,
+                strings: false
+            },
+            parameterHints: {
+                enabled: true,
+                cycle: true
+            },
+            suggestOnTriggerCharacters: true,
+            acceptSuggestionOnEnter: 'on',
+            tabCompletion: 'on',
+            wordBasedSuggestions: true,
+            snippetSuggestions: 'inline',
+            selectOnLineNumbers: true,
+            roundedSelection: false,
+            renderWhitespace: 'selection',
+            renderControlCharacters: false,
+            renderIndentGuides: true,
+            renderLineHighlight: 'line',
+            codeLens: true,
+            hideCursorInOverviewRuler: false,
+            scrollbar: {
+                useShadows: false,
+                verticalHasArrows: false,
+                horizontalHasArrows: false,
+                vertical: 'visible',
+                horizontal: 'visible',
+                verticalScrollbarSize: 6,
+                horizontalScrollbarSize: 6,
+                arrowSize: 30
+            },
+            padding: {
+                top: 24,
+                bottom: 8
+            }
+        });
+
+        // Set the container height
+        container.style.height = '280px';
+        editor.layout();
+
+        // Add format document command
+        editor.addAction({
+            id: 'format-sql',
+            label: 'Format SQL',
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF],
+            precondition: null,
+            keybindingContext: null,
+            contextMenuGroupId: 'modification',
+            contextMenuOrder: 1.5,
+            run: (ed) => {
+                const currentValue = ed.getValue();
+                const formatted = this.formatSQL(currentValue);
+                ed.setValue(formatted);
+            }
+        });
+
+        return editor;
+    }
+
+    // Bee Swarm Chart Implementation
+    createBeeSwarm(data, options) {
+        if (typeof Plot === 'undefined' || typeof d3 === 'undefined') {
+            console.warn('Plot or d3 not available for bee swarm chart');
+            return null;
+        }
+
+        try {
+            const gap = options.gap != null ? options.gap : 1;
+            const ticks = options.ticks != null ? options.ticks : 50;
+            
+            const dots = Plot.dot(data, options);
+            const render = dots.render;
+            const self = this;
+            
+            dots.render = function () {
+                const g = render.apply(this, arguments);
+                const circles = d3.select(g).selectAll("circle");
+                circles.attr('class', 'point');
+
+                const nodes = [];
+                const [cx, cy, x, y, forceX, forceY] =
+                    options.direction === "x"
+                        ? ["cx", "cy", "x", "y", d3.forceX, d3.forceY]
+                        : ["cy", "cx", "y", "x", d3.forceY, d3.forceX];
+                        
+                for (const c of circles) {
+                    nodes.push({
+                        x: +c.getAttribute(cx),
+                        y: +c.getAttribute(cy),
+                        r: +c.getAttribute("r")
+                    });
+                }
+                
+                if (options.dynamic) {
+                    const update = function() {
+                        circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+                    };
+                    
+                    const force = d3
+                        .forceSimulation(nodes)
+                        .force("x", forceX((d) => d[x]).strength(0.8))
+                        .force("y", forceY((d) => d[y]).strength(0.05))
+                        .force(
+                            "collide",
+                            d3.forceCollide()
+                                .radius((d) => d.r + gap)
+                                .iterations(3)
+                        )
+                        .tick(ticks)
+                        .stop();
+                        
+                    update();
+                    force.on("tick", update).restart();
+                }
+                
+                circles.on("click", function(ev, index) {
+                    self.selectQueryPoint(ev, data[index], circles);
+                });
+
+                // Don't auto-select first point - wait for user interaction
+                
+                return g;
+            };
+            
+            return dots;
+        } catch (error) {
+            console.error('Error in createBeeSwarm:', error);
+            return null;
+        }
+    }
+
+    selectQueryPoint(ev, row, circles) {
+        const selectedClass = 'selected';
+        const point = ev.target;
+        const pointSize = 4;
+        
+        // Remove selection from all points
+        circles.each(function() {
+            this.classList.remove(selectedClass);
+            this.setAttribute('r', pointSize);
+        });
+        
+        // Select current point
+        point.classList.add(selectedClass);
+        point.setAttribute('r', pointSize * 1.5);
+        point.parentElement.appendChild(point);
+
+        this.showQueryDetails(row);
+    }
+
+    showQueryDetails(queryData) {
+        const modal = document.getElementById('queryModal');
+        const detailsContainer = document.getElementById('queryDetails');
+        
+        detailsContainer.innerHTML = '';
+        
+        const details = [
+            { label: 'Query ID', value: queryData.QUERY_ID },
+            { label: 'Execution Time', value: `${queryData.TOTAL_ELAPSED_TIME}ms` },
+            { label: 'Query Type', value: queryData.QUERY_TYPE },
+            { label: 'Database', value: queryData.DATABASE_NAME },
+            { label: 'Warehouse', value: queryData.WAREHOUSE_NAME },
+            { label: 'Query Text', value: queryData.QUERY_TEXT }
+        ];
+        
+        details.forEach(detail => {
+            const detailDiv = document.createElement('div');
+            detailDiv.className = 'mb-4';
+            
+            const label = document.createElement('label');
+            label.className = 'block text-sm font-semibold text-gray-700 mb-1';
+            label.textContent = detail.label;
+            
+            const value = document.createElement('div');
+            if (detail.label === 'Query Text') {
+                value.className = 'text-sm text-gray-900 bg-gray-50 p-3 rounded-lg font-mono max-h-32 overflow-y-auto';
+            } else {
+                value.className = 'text-sm text-gray-900';
+            }
+            value.textContent = detail.value || 'N/A';
+            
+            detailDiv.appendChild(label);
+            detailDiv.appendChild(value);
+            detailsContainer.appendChild(detailDiv);
+        });
+        
+        modal.classList.remove('hidden');
+    }
+
+    closeModal() {
+        const modal = document.getElementById('queryModal');
+        modal.classList.add('hidden');
+    }
+
+    renderQuerySwarmChart() {
+        if (!this.data.queryHistory || this.data.queryHistory.length === 0) {
+            console.warn('No query history data available');
+            return;
+        }
+
+        // Check if required libraries are loaded
+        if (typeof Plot === 'undefined' || typeof d3 === 'undefined') {
+            console.warn('Plot or d3 libraries not loaded, skipping bee swarm chart');
+            const container = document.getElementById('querySwarmChart');
+            if (container) {
+                container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Chart libraries loading...</p></div>';
+            }
+            return;
+        }
+
+        const container = document.getElementById('querySwarmChart');
+        if (!container) return;
+        
+        // Clear previous chart
+        container.innerHTML = '';
+        
+        // Prepare data for bee swarm
+        const swarmData = this.data.queryHistory.slice(0, 500); // Limit for performance
+        
+        try {
+            const beeSwarmMark = this.createBeeSwarm(swarmData, {
+                x: (d) => d.TOTAL_ELAPSED_TIME,
+                fill: (d) => d.TOTAL_ELAPSED_TIME,
+                r: 4,
+                gap: 0.5,
+                ticks: 2,
+                dynamic: true,
+                title: (d) => `${d.QUERY_TYPE}: ${d.TOTAL_ELAPSED_TIME}ms`
+            });
+
+            if (!beeSwarmMark) {
+                throw new Error('Failed to create bee swarm mark');
+            }
+
+            const chart = Plot.plot({
+                marks: [beeSwarmMark],
+                color: {
+                    type: "linear",
+                    range: ["#249EDC", "#A62A92"],
+                    interpolate: "hsl",
+                    legend: true,
+                    label: "Execution Time (ms) →"
+                },
+                height: 300,
+                width: container.offsetWidth - 40,
+                marginLeft: 50,
+                marginRight: 50,
+                marginTop: 20,
+                marginBottom: 60
+            });
+            
+            container.appendChild(chart);
+            this.querySwarmChart = chart;
+        } catch (error) {
+            console.error('Error creating bee swarm chart:', error);
+            container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Interactive chart unavailable - using fallback</p></div>';
+            
+            // Fallback: Simple scatter plot using ApexCharts
+            this.renderFallbackQueryChart(container, swarmData);
+        }
+    }
+
+    // Fallback chart using ApexCharts
+    renderFallbackQueryChart(container, data) {
+        container.innerHTML = '<div id="fallbackQueryChart" style="height: 300px;"></div>';
+        
+        const chartData = data.map((item, index) => ({
+            x: item.TOTAL_ELAPSED_TIME,
+            y: Math.random() * 10, // Random y-position for scatter effect
+            queryData: item
+        }));
+
+        const fallbackChart = new ApexCharts(document.getElementById('fallbackQueryChart'), {
+            series: [{
+                name: 'Query Performance',
+                data: chartData
+            }],
+            chart: {
+                type: 'scatter',
+                height: 300,
+                fontFamily: 'Inter, sans-serif',
+                events: {
+                    markerClick: (event, chartContext, { dataPointIndex }) => {
+                        this.showQueryDetails(chartData[dataPointIndex].queryData);
+                    }
+                }
+            },
+            xaxis: {
+                title: { text: 'Execution Time (ms)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                show: false
+            },
+            colors: ['#56CCF2'],
+            markers: {
+                size: 6,
+                strokeWidth: 2,
+                strokeColors: '#ffffff',
+                hover: { size: 8 }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            tooltip: {
+                custom: ({ dataPointIndex }) => {
+                    const item = chartData[dataPointIndex].queryData;
+                    return `<div class="p-3">
+                        <div class="font-semibold">${item.QUERY_TYPE}</div>
+                        <div class="text-sm">${item.TOTAL_ELAPSED_TIME}ms</div>
+                        <div class="text-xs text-gray-500">${item.DATABASE_NAME}</div>
+                    </div>`;
+                }
+            }
+        });
+
+        fallbackChart.render();
+    }
+
+    renderDashboard() {
+        this.updateKPIs();
+        this.renderTabCharts('cost'); // Default tab
+        
+        // Ensure cost tab is active on initial load
+        const activeTab = document.querySelector('.nav-item.active');
+        if (!activeTab || activeTab.dataset.tab !== 'cost') {
+            this.switchTab('cost');
+        }
+    }
+
+    updateKPIs() {
+        // Cost & Credits KPIs
+        const totalSpend = this.data.costPerCredit.reduce((sum, item) => sum + item.SPEND_USD, 0);
+        document.getElementById('totalSpend').textContent = `$${totalSpend.toFixed(2)}`;
+
+        const avgCredits = this.data.costPerCredit.reduce((sum, item) => sum + item.CREDITS, 0) / this.currentDateRange;
+        document.getElementById('avgCredits').textContent = avgCredits.toFixed(1);
+
+        const activeWarehouses = new Set(this.data.creditsByWarehouse.map(item => item.WAREHOUSE_NAME)).size;
+        document.getElementById('activeWarehouses').textContent = activeWarehouses;
+
+        const avgActiveRatio = this.data.idleActiveRatio.reduce((sum, item) => sum + item.ACTIVE_PCT, 0) / this.data.idleActiveRatio.length;
+        document.getElementById('efficiencyScore').textContent = `${(avgActiveRatio * 100).toFixed(1)}%`;
+
+        // Performance KPIs
+        const avgP95 = this.data.queryPerformance.reduce((sum, item) => sum + item.P95_EXEC_SEC, 0) / this.data.queryPerformance.length;
+        document.getElementById('p95QueryTime').textContent = `${avgP95.toFixed(2)}s`;
+
+        const avgFailureRate = this.data.queryFailureRate.reduce((sum, item) => sum + item.FAILURE_RATE, 0) / this.data.queryFailureRate.length;
+        document.getElementById('queryFailureRate').textContent = `${(avgFailureRate * 100).toFixed(1)}%`;
+
+        const todayEvents = this.data.warehouseEvents.filter(event => {
+            const today = new Date();
+            const eventDate = new Date(event.EVENT_TS);
+            return eventDate.toDateString() === today.toDateString();
+        }).length;
+        document.getElementById('warehouseEvents').textContent = todayEvents;
+
+        document.getElementById('loadEfficiency').textContent = `${(avgActiveRatio * 100).toFixed(1)}%`;
+
+        // Pipeline KPIs
+        const avgConnectorSuccess = this.data.connectorHealth.reduce((sum, item) => sum + item.SUCCESS_PCT, 0) / this.data.connectorHealth.length;
+        document.getElementById('connectorSuccess').textContent = `${(avgConnectorSuccess * 100).toFixed(1)}%`;
+
+        const totalSLABreaches = this.data.connectorHealth.reduce((sum, item) => sum + item.SLA_BREACHES, 0);
+        document.getElementById('slaBreaches').textContent = totalSLABreaches;
+
+        const staleDatasets = this.data.dataFreshness.filter(item => item.HOURS_SINCE_LAST_RUN > 24).length;
+        document.getElementById('staleDatasets').textContent = staleDatasets;
+
+        const avgDailyBytes = this.data.dailyBytes.reduce((sum, item) => sum + item.AVG_BYTES_INSERTED, 0) / this.data.dailyBytes.length;
+        document.getElementById('dailyBytes').textContent = Math.round(avgDailyBytes / 1048576); // Convert to MB
+
+        // Adoption KPIs
+        const latestWAU = this.data.snowflakeWAU[this.data.snowflakeWAU.length - 1]?.WAU || 0;
+        document.getElementById('weeklyActiveUsers').textContent = latestWAU;
+
+        document.getElementById('activeDatasets').textContent = this.data.datasetCreditCost.length;
+
+        const activeConnectors = new Set(this.data.connectorHealth.map(item => item.CONNECTOR)).size;
+        document.getElementById('activeConnectors').textContent = activeConnectors;
+
+        const costPerUser = totalSpend / latestWAU;
+        document.getElementById('costPerUser').textContent = `$${costPerUser.toFixed(2)}`;
+
+        // Query Optimization KPIs
+        if (this.queryRewriteResults.length > 0) {
+            document.getElementById('totalQueriesAnalyzed').textContent = this.queryRewriteResults.length;
+            
+            const avgImprovement = this.queryRewriteResults
+                .filter(q => q.ACTION !== 'IGNORE')
+                .reduce((sum, q) => sum + q.PCT_MS, 0) / 
+                this.queryRewriteResults.filter(q => q.ACTION !== 'IGNORE').length;
+            document.getElementById('avgPerformanceImprovement').textContent = `${avgImprovement.toFixed(1)}%`;
+            
+            const totalSavings = this.queryRewriteResults
+                .filter(q => q.ACTION === 'ADOPT')
+                .reduce((sum, q) => sum + q.EST_USD_SAVINGS, 0);
+            document.getElementById('estimatedCreditsSaved').textContent = totalSavings.toFixed(1);
+            
+            const adoptionRate = this.queryRewriteResults.filter(q => q.ACTION === 'ADOPT').length / 
+                                this.queryRewriteResults.length * 100;
+            document.getElementById('adoptionRate').textContent = `${adoptionRate.toFixed(1)}%`;
+        }
+    }
+
+    renderTabCharts(tabName) {
+        switch(tabName) {
+            case 'cost':
+                this.renderCostCharts();
+                break;
+            case 'performance':
+                this.renderPerformanceCharts();
+                break;
+            case 'pipeline':
+                this.renderPipelineCharts();
+                break;
+            case 'adoption':
+                this.renderAdoptionCharts();
+                break;
+            case 'optimization':
+                this.renderOptimizationCharts();
+                break;
+        }
+    }
+
+    renderOptimizationCharts() {
+        // Performance Improvement Distribution - Compact
+        const improvementRanges = [
+            { range: '0-10%', count: 0 },
+            { range: '10-25%', count: 0 },
+            { range: '25-50%', count: 0 },
+            { range: '50-75%', count: 0 },
+            { range: '75%+', count: 0 }
+        ];
+
+        this.queryRewriteResults.forEach(query => {
+            const improvement = query.PCT_MS;
+            if (improvement < 10) improvementRanges[0].count++;
+            else if (improvement < 25) improvementRanges[1].count++;
+            else if (improvement < 50) improvementRanges[2].count++;
+            else if (improvement < 75) improvementRanges[3].count++;
+            else improvementRanges[4].count++;
+        });
+
+        this.charts.improvementDistributionChart = new ApexCharts(document.querySelector("#improvementDistributionChart"), {
+            series: [{
+                name: 'Queries',
+                data: improvementRanges.map(range => range.count)
+            }],
+            chart: {
+                type: 'bar',
+                height: 140,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            xaxis: {
+                categories: improvementRanges.map(range => range.range),
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            yaxis: {
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            colors: ['#56CCF2'],
+            plotOptions: {
+                bar: {
+                    borderRadius: 2,
+                    dataLabels: { position: 'top' }
+                }
+            },
+            dataLabels: { 
+                enabled: true,
+                style: { fontSize: '9px', colors: [this.isDarkMode ? '#e5e7eb' : '#374151'] }
+            },
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: this.isDarkMode ? '#374151' : '#e5e7eb',
+                show: true
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.improvementDistributionChart.render();
+
+        // Action Breakdown - Compact
+        const actionCounts = {
+            ADOPT: this.queryRewriteResults.filter(q => q.ACTION === 'ADOPT').length,
+            BENCH_TEST: this.queryRewriteResults.filter(q => q.ACTION === 'BENCH_TEST').length,
+            IGNORE: this.queryRewriteResults.filter(q => q.ACTION === 'IGNORE').length
+        };
+
+        this.charts.actionBreakdownChart = new ApexCharts(document.querySelector("#actionBreakdownChart"), {
+            series: Object.values(actionCounts),
+            chart: {
+                type: 'donut',
+                height: 140,
+                fontFamily: 'Inter, sans-serif'
+            },
+            labels: Object.keys(actionCounts),
+
+            colors: ['#95CBEE', '#A62A92', '#9ca3af'], 
+            plotOptions: {
+                pie: {
+                    donut: {
+                        size: '60%',
+                        labels: {
+                            show: true,
+                            total: {
+                                show: true,
+                                label: 'Total',
+                                formatter: () => this.queryRewriteResults.length.toString(),
+                                style: {
+                                    fontSize: '11px',
+                                    color: this.isDarkMode ? '#e5e7eb' : '#374151'
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                formatter: (val) => `${val.toFixed(0)}%`,
+                style: {
+                    fontSize: '9px',
+                    colors: [this.isDarkMode ? '#e5e7eb' : '#374151']
+                }
+            },
+            legend: { 
+                show: false
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.actionBreakdownChart.render();
+
+        // Savings Over Time - Compact
+        const savingsByDate = {};
+        this.queryRewriteResults.forEach(query => {
+            const date = new Date(query.RUN_DTS).toISOString().split('T')[0];
+            if (!savingsByDate[date]) savingsByDate[date] = 0;
+            if (query.ACTION === 'ADOPT') {
+                savingsByDate[date] += query.EST_USD_SAVINGS;
+            }
+        });
+
+        const sortedDates = Object.keys(savingsByDate).sort();
+        
+        this.charts.savingsOverTimeChart = new ApexCharts(document.querySelector("#savingsOverTimeChart"), {
+            series: [{
+                name: 'Est. Savings',
+                data: sortedDates.map(date => ({
+                    x: date,
+                    y: savingsByDate[date]
+                }))
+            }],
+            chart: {
+                type: 'area',
+                height: 140,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { curve: 'smooth', width: 2 },
+            colors: ['#9841b6'],
+            fill: {
+                type: 'gradient',
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.7,
+                    opacityTo: 0.3,
+                    stops: [0, 90, 100]
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: this.isDarkMode ? '#374151' : '#e5e7eb',
+                show: true
+            },
+            xaxis: {
+                type: 'datetime',
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            yaxis: {
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' },
+                    formatter: (val) => `${val.toFixed(0)}`
+                }
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.savingsOverTimeChart.render();
+    }
+
+    renderCostCharts() {
+        // Daily Credits by Service Type (Full Width Stacked Area)
+        const creditsByService = this.aggregateByServiceType();
+        this.charts.creditsChart = new ApexCharts(document.querySelector("#creditsChart"), {
+            series: creditsByService.series,
+            chart: { 
+                type: 'area', 
+                height: 320, 
+                stacked: true, 
+                animations: { enabled: true },
+                toolbar: { show: false },
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                categories: creditsByService.categories,
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            colors: ['#56CCF2', '#2F80ED', '#1E3A8A', '#3730A3', '#4C1D95'],
+            stroke: { curve: 'smooth', width: 2 },
+            fill: { 
+                opacity: 0.8,
+                type: 'gradient',
+                gradient: {
+                    opacityFrom: 0.6,
+                    opacityTo: 0.8,
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.creditsChart.render();
+
+        // Warehouse Cost Distribution (Treemap)
+        const warehouseCosts = this.aggregateWarehouseCosts();
+        this.charts.warehouseTreemap = new ApexCharts(document.querySelector("#warehouseTreemap"), {
+            series: [{ data: warehouseCosts }],
+            chart: { 
+                type: 'treemap', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            colors: ['#56CCF2'],
+            plotOptions: {
+                treemap: {
+                    enableShades: true,
+                    shadeIntensity: 0.5,
+                    reverseNegativeShade: true,
+                    colorScale: {
+                        ranges: [{
+                            from: 0,
+                            to: 50,
+                            color: '#bfdbfe'
+                        }, {
+                            from: 50,
+                            to: 100,
+                            color: '#56CCF2'
+                        }, {
+                            from: 100,
+                            to: 200,
+                            color: '#2F80ED'
+                        }]
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                style: { fontSize: '12px', fontWeight: 600 }
+            }
+        });
+        this.charts.warehouseTreemap.render();
+
+        // Warehouse Utilization (Horizontal Bar)
+        this.charts.utilizationChart = new ApexCharts(document.querySelector("#utilizationChart"), {
+            series: [{
+                name: 'Active %',
+                data: this.data.idleActiveRatio.map(item => (item.ACTIVE_PCT * 100).toFixed(1))
+            }, {
+                name: 'Queued %',
+                data: this.data.idleActiveRatio.map(item => (item.QUEUED_PCT * 100).toFixed(1))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            plotOptions: { 
+                bar: { 
+                    horizontal: true,
+                    barHeight: '70%',
+                    dataLabels: { position: 'top' }
+                } 
+            },
+            xaxis: { 
+                categories: this.data.idleActiveRatio.map(item => item.WAREHOUSE_NAME),
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            colors: ['#A62A92', '#259EDC'],
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.utilizationChart.render();
+
+        // Dataset Cost Table
+        this.renderDatasetCostTable();
+    }
+
+    renderPerformanceCharts() {
+        // P95 Query Duration Trend (Full Width)
+        this.charts.queryPerformanceChart = new ApexCharts(document.querySelector("#queryPerformanceChart"), {
+            series: [{
+                name: 'P95 Execution Time',
+                data: this.data.queryPerformance.map(item => ({
+                    x: item.USAGE_DATE,
+                    y: item.P95_EXEC_SEC
+                }))
+            }],
+            chart: { 
+                type: 'line', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { curve: 'smooth', width: 3 },
+            colors: ['#56CCF2'],
+            fill: {
+                type: 'gradient',
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.7,
+                    opacityTo: 0.9,
+                    stops: [0, 90, 100]
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                title: { text: 'Seconds', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            annotations: {
+                yaxis: [{
+                    y: 1.0,
+                    borderColor: '#f59e0b',
+                    borderWidth: 2,
+                    strokeDashArray: 5,
+                    label: { 
+                        text: 'SLA Threshold (1.0s)', 
+                        style: { color: '#259EDC', background: '#fef3c7' }
+                    }
+                }]
+            }
+        });
+        this.charts.queryPerformanceChart.render();
+
+        // Query Failure Rate Trend
+        this.charts.failureRateChart = new ApexCharts(document.querySelector("#failureRateChart"), {
+            series: [{
+                name: 'Failure Rate %',
+                data: this.data.queryFailureRate.map(item => ({
+                    x: item.USAGE_DATE,
+                    y: (item.FAILURE_RATE * 100).toFixed(2)
+                }))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            colors: ['#A62A92'],
+            plotOptions: {
+                bar: {
+                    borderRadius: 4,
+                    dataLabels: { position: 'top' }
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                title: { text: 'Failure Rate (%)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }
+        });
+        this.charts.failureRateChart.render();
+
+        // Warehouse Events Timeline
+        const eventData = this.processWarehouseEvents();
+        this.charts.warehouseEventsChart = new ApexCharts(document.querySelector("#warehouseEventsChart"), {
+            series: eventData.series,
+            chart: { 
+                type: 'scatter', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            markers: {
+                size: 3 // smaller dots (default is 5)
+            },
+            xaxis: { 
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: { 
+                categories: eventData.warehouses,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            colors: ['#A62A92', '#A07AC0', '#99CCEE'],
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { 
+                position: 'top',
+                labels: { colors: '#374151' }
+            }
+        });
+
+        this.charts.warehouseEventsChart.render();
+
+        // Query Performance Bee Swarm Chart
+        this.renderQuerySwarmChart();
+    }
+
+    renderPipelineCharts() {
+        // Bytes Ingested & API Anomalies (Full Width)
+        this.charts.bytesApiChart = new ApexCharts(document.querySelector("#bytesApiChart"), {
+            series: [{
+                name: 'Bytes Ingested (MB)',
+                type: 'area',
+                data: this.data.dailyBytes.map(item => ({
+                    x: item.RUN_DATE,
+                    y: (item.AVG_BYTES_INSERTED / 1048576).toFixed(2)
+                }))
+            }, {
+                name: 'API Z-Score',
+                type: 'scatter',
+                data: this.data.apiZscore.map(item => ({
+                    x: item.RUN_DATE,
+                    y: item.ZSCORE
+                }))
+            }],
+            chart: { 
+                height: 320,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { 
+                curve: 'smooth',
+                width: [3, 0]
+            },
+            fill: {
+                type: ['gradient', 'solid'],
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.3,
+                    opacityTo: 0.3,
+                }
+            },
+            colors: ['#A62A92', '#95CBEE'],
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: [{
+                title: { text: 'Bytes (MB)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }, {
+                opposite: true,
+                title: { text: 'Z-Score', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }],
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            },
+            annotations: {
+                yaxis: [{
+                    y: 3,
+                    y2: -3,
+                    yAxisIndex: 1,
+                    borderColor: '#f59e0b',
+                    fillColor: '#fef3c7',
+                    opacity: 0,
+                    label: { text: 'Normal Range', style: { color: '#d97706' } }
+                }]
+            }
+        });
+        this.charts.bytesApiChart.render();
+
+        // Connector Success Rate (Donut)
+        const successData = this.aggregateConnectorSuccess();
+        this.charts.connectorSuccessChart = new ApexCharts(document.querySelector("#connectorSuccessChart"), {
+            series: [parseFloat(successData.success), parseFloat(successData.failure)],
+            chart: { 
+                type: 'donut', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            labels: ['Success', 'Failure'],
+            colors: ['#95CBEE', '#A62A92'],
+            plotOptions: {
+                pie: {
+                    donut: {
+                        size: '65%',
+                        labels: {
+                            show: true,
+                            total: {
+                                show: true,
+                                label: 'Success Rate',
+                                formatter: () => `${successData.success}%`
+                            }
+                        }
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                formatter: (val) => `${val.toFixed(1)}%`
+            },
+            legend: { 
+                position: 'bottom',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.connectorSuccessChart.render();
+
+        // SLA Breaches Heatmap
+        const slaData = this.processSLABreaches();
+        this.charts.slaHeatmapChart = new ApexCharts(document.querySelector("#slaHeatmapChart"), {
+            series: slaData.series,
+            chart: { 
+                type: 'heatmap', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                categories: slaData.dates,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            colors: ['#56CCF2'],
+            colorScale: {
+                ranges: [{
+                    from: 0,
+                    to: 0,
+                    color: '#56CCF2',
+                    name: 'No Breaches'
+                }, {
+                    from: 1,
+                    to: 5,
+                    color: '#2F80ED',
+                    name: 'Low'
+                }, {
+                    from: 6,
+                    to: 10,
+                    color: '#1E3A8A',
+                    name: 'High'
+                }]
+            },
+            dataLabels: { enabled: false },
+            grid: { show: false }
+        });
+        this.charts.slaHeatmapChart.render();
+
+        // Data Freshness Table
+        this.renderFreshnessTable();
+    }
+
+    renderAdoptionCharts() {
+        // Weekly Active Users Trend (Full Width)
+        this.charts.wauTrendChart = new ApexCharts(document.querySelector("#wauTrendChart"), {
+        series: [{
+            name: 'Weekly Active Users',
+            data: this.data.snowflakeWAU.map(item => ({
+            x: item.ISO_WEEK,
+            y: item.WAU
+            }))
+        }],
+        chart: { 
+            type: 'bar', 
+            height: 320,
+            fontFamily: 'Inter, sans-serif',
+            toolbar: { show: false }
+        },
+
+        // Solid color bars, no outline
+        colors: ['#259EDC'],
+        fill: { type: 'solid', opacity: 1 },
+        stroke: { show: false, width: 0 },
+
+        // (Optional) bar styling
+        plotOptions: {
+            bar: {
+            columnWidth: '55%',
+            borderRadius: 4
+            }
+        },
+
+        dataLabels: { enabled: false },
+        grid: { strokeDashArray: 1, borderColor: '#ffffff' },
+        xaxis: {
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        },
+        yaxis: {
+            title: { text: 'Active Users', style: { color: '#6b7280' } },
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        }
+        });
+        this.charts.wauTrendChart.render();
+
+        // Top 5 Connectors by Rows (Full Width)
+        const topConnectors = this.getTopConnectorsByRows();
+        this.charts.topConnectorsChart = new ApexCharts(document.querySelector("#topConnectorsChart"), {
+        series: topConnectors.series,
+        chart: { 
+            type: 'line', 
+            height: 320,
+            fontFamily: 'Inter, sans-serif',
+            toolbar: { show: false }
+        },
+        stroke: { curve: 'smooth', width: 3 },
+        colors: ['#A62A92', '#259EDC', '#95CBEE', '#F2A44E', '#F2A44E'],
+        dataLabels: { enabled: false },
+        grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+        xaxis: { 
+            categories: topConnectors.dates,
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        },
+        yaxis: {
+            title: { text: 'Rows Ingested', style: { color: '#6b7280' } },
+            labels: { 
+            style: { colors: '#6b7280', fontSize: '12px' },
+            formatter: (val) => val.toLocaleString()
+            }
+        },
+        legend: { 
+            position: 'top',
+            horizontalAlign: 'right',
+            labels: { colors: '#374151' }
+        },
+        markers: {
+            size: 2,          // smaller dots
+            strokeWidth: 1,   // thinner outline
+            hover: { sizeOffset: 1 }
+        }
+        });
+        this.charts.topConnectorsChart.render();
+
+
+        // Credits vs Users Correlation (Scatter)
+        const correlationData = this.processCreditsUsersCorrelation();
+        this.charts.creditsUsersChart = new ApexCharts(document.querySelector("#creditsUsersChart"), {
+            series: [{ name: 'Warehouses', data: correlationData }],
+            chart: { 
+                type: 'scatter', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                title: { text: 'Weekly Active Users', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: { 
+                title: { text: 'Credits Consumed', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            colors: ['#56CCF2'],
+            markers: {
+                size: 8,
+                strokeWidth: 2,
+                strokeColors: '#ffffff',
+                hover: { size: 10 }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
+        });
+        this.charts.creditsUsersChart.render();
+
+        // Dataset Cost Distribution (Horizontal Bar)
+        this.charts.datasetCostChart = new ApexCharts(document.querySelector("#datasetCostChart"), {
+            series: [{
+                data: this.data.datasetCreditCost
+                    .sort((a, b) => b.COST_USD - a.COST_USD)
+                    .slice(0, 8)
+                    .map(item => ({
+                        x: item.DATASET_NAME.length > 25 ? 
+                            item.DATASET_NAME.substring(0, 25) + '...' : 
+                            item.DATASET_NAME,
+                        y: item.COST_USD
+                    }))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            plotOptions: { 
+                bar: { 
+                    horizontal: true,
+                    borderRadius: 4,
+                    dataLabels: { position: 'top' }
+                } 
+            },
+            colors: ['#56CCF2'],
+            dataLabels: { 
+                enabled: true,
+                formatter: (val) => `${val.toFixed(3)}`,
+                style: { fontSize: '11px', colors: ['#374151'] }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                title: { text: 'Cost (USD)', style: { color: '#6b7280' } },
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '12px' },
+                    formatter: (val) => `${val.toFixed(2)}`
+                }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            }
+        });
+        this.charts.datasetCostChart.render();
+    }
+
+    // Data processing methods
+    aggregateByServiceType() {
+        const serviceTypes = ['WAREHOUSE_METERING', 'AI_SERVICES', 'SNOWPARK_CONTAINER_SERVICES'];
+        const dates = [...new Set(this.data.costPerCredit.map(item => 
+            new Date(item.USAGE_DATE).toISOString().split('T')[0]
+        ))].sort();
+
+        const series = serviceTypes.map(serviceType => ({
+            name: serviceType,
+            data: dates.map(date => {
+                const dayData = this.data.costPerCredit.filter(item => 
+                    new Date(item.USAGE_DATE).toISOString().split('T')[0] === date && 
+                    item.SERVICE_TYPE === serviceType
+                );
+                return dayData.reduce((sum, item) => sum + item.CREDITS, 0);
+            })
+        }));
+
+        return { series, categories: dates };
+    }
+
+    aggregateWarehouseCosts() {
+        const warehouseTotals = {};
+        this.data.creditsByWarehouse.forEach(item => {
+            if (!warehouseTotals[item.WAREHOUSE_NAME]) {
+                warehouseTotals[item.WAREHOUSE_NAME] = 0;
+            }
+            warehouseTotals[item.WAREHOUSE_NAME] += item.SPEND_USD;
+        });
+
+        return Object.entries(warehouseTotals).map(([name, cost]) => ({
+            x: name,
+            y: cost.toFixed(2)
+        }));
+    }
+
+    processWarehouseEvents() {
+        const warehouses = [...new Set(this.data.warehouseEvents.map(e => e.WAREHOUSE_NAME))];
+        const eventTypes = ['SUSPEND_WAREHOUSE', 'RESUME_WAREHOUSE', 'RESIZE_WAREHOUSE'];
+        
+        const series = eventTypes.map(eventType => ({
+            name: eventType,
+            data: this.data.warehouseEvents
+                .filter(e => e.EVENT_NAME === eventType)
+                .map(e => ({
+                    x: new Date(e.EVENT_TS).getTime(),
+                    y: warehouses.indexOf(e.WAREHOUSE_NAME)
+                }))
+        }));
+
+        return { series, warehouses };
+    }
+
+    aggregateConnectorSuccess() {
+        const totalRuns = this.data.connectorRuns.length;
+        const successfulRuns = this.data.connectorRuns.filter(run => run.Status === 'SUCCESS').length;
+        
+        return {
+            success: (successfulRuns / totalRuns * 100).toFixed(1),
+            failure: ((totalRuns - successfulRuns) / totalRuns * 100).toFixed(1)
+        };
+    }
+
+    processSLABreaches() {
+        const connectors = [...new Set(this.data.connectorHealth.map(item => item.CONNECTOR))];
+        const dates = [...new Set(this.data.connectorHealth.map(item => 
+            new Date(item.RUN_DATE).toISOString().split('T')[0]
+        ))].sort();
+
+        const series = connectors.map(connector => ({
+            name: connector,
+            data: dates.map(date => {
+                const dayData = this.data.connectorHealth.find(item => 
+                    item.CONNECTOR === connector && 
+                    new Date(item.RUN_DATE).toISOString().split('T')[0] === date
+                );
+                return dayData ? dayData.SLA_BREACHES : 0;
+            })
+        }));
+
+        return { series, dates };
+    }
+
+    processCreditsUsersCorrelation() {
+        const latestWAU = this.data.snowflakeWAU[this.data.snowflakeWAU.length - 1]?.WAU || 100;
+        
+        return this.data.creditsByWarehouse
+            .reduce((acc, item) => {
+                const existing = acc.find(x => x.warehouse === item.WAREHOUSE_NAME);
+                if (existing) {
+                    existing.credits += item.CREDITS;
+                } else {
+                    acc.push({ warehouse: item.WAREHOUSE_NAME, credits: item.CREDITS });
+                }
+                return acc;
+            }, [])
+            .map(item => ({
+                x: latestWAU + (Math.random() - 0.5) * 20,
+                y: item.credits
+            }));
+    }
+
+    getTopConnectorsByRows() {
+        const connectorTotals = {};
+        const dates = [...new Set(this.data.connectorRuns.map(item => 
+            new Date(item['Created At']).toISOString().split('T')[0]
+        ))].sort();
+
+        this.data.connectorRuns.forEach(run => {
+            const connector = run['Data Source Name'];
+            if (!connectorTotals[connector]) {
+                connectorTotals[connector] = {};
+            }
+            const date = new Date(run['Created At']).toISOString().split('T')[0];
+            if (!connectorTotals[connector][date]) {
+                connectorTotals[connector][date] = 0;
+            }
+            connectorTotals[connector][date] += run['Updated Rows'];
+        });
+
+        const topConnectors = Object.entries(connectorTotals)
+            .map(([name, data]) => ({
+                name,
+                total: Object.values(data).reduce((sum, val) => sum + val, 0)
+            }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 5);
+
+        const series = topConnectors.map(connector => ({
+            name: connector.name,
+            data: dates.map(date => connectorTotals[connector.name][date] || 0)
+        }));
+
+        return { series, dates };
+    }
+
+    renderDatasetCostTable() {
+        const tbody = document.getElementById('datasetCostBody');
+        tbody.innerHTML = '';
+        
+        this.data.datasetCreditCost
+            .sort((a, b) => b.COST_USD - a.COST_USD)
+            .slice(0, 10)
+            .forEach((item, index) => {
+                const trend = Math.random() > 0.5 ? 'up' : 'down';
+                const trendColor = trend === 'up' ? 'text-green-600' : 'text-red-600';
+                const trendIcon = trend === 'up' ? '↗' : '↘';
+                const trendValue = `${trend === 'up' ? '+' : '-'}${(Math.random() * 10 + 1).toFixed(1)}%`;
+                
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-colors';
+                row.innerHTML = `
+                    <td class="py-4 px-4">
+                        <div class="flex items-center">
+                            <div class="w-8 h-8 rounded-lg flex items-center justify-center mr-3"
+                            style="background: linear-gradient(135deg, #95CBEE, #259EDC);"">
+                                <span class="text-white text-xs font-bold">${index + 1}</span>
+                            </div>
+                            <span class="font-medium text-gray-900">${item.DATASET_NAME}</span>
+                        </div>
+                    </td>
+                    <td class="py-4 px-4 text-gray-700 font-mono">${item.CREDITS.toFixed(6)}</td>
+                    <td class="py-4 px-4 text-gray-900 font-semibold">${item.COST_USD.toFixed(6)}</td>
+                    <td class="py-4 px-4">
+                        <span class="${trendColor} font-medium text-sm">
+                            ${trendIcon} ${trendValue}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+    }
+
+    renderFreshnessTable() {
+        const tbody = document.getElementById('freshnessBody');
+        tbody.innerHTML = '';
+        
+        this.data.dataFreshness.forEach(item => {
+            const row = document.createElement('tr');
+            const status = item.HOURS_SINCE_LAST_RUN > 24 ? 'error' : 
+                          item.HOURS_SINCE_LAST_RUN > 12 ? 'warning' : 'success';
+            const statusText = item.HOURS_SINCE_LAST_RUN > 24 ? 'Stale' : 
+                             item.HOURS_SINCE_LAST_RUN > 12 ? 'Warning' : 'Fresh';
+            
+            const lastUpdate = new Date(Date.now() - (item.HOURS_SINCE_LAST_RUN * 60 * 60 * 1000));
+            
+            row.className = 'hover:bg-gray-50 transition-colors';
+            row.innerHTML = `
+                <td class="py-4 px-4">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-3 ${
+                            status === 'success' ? 'bg-green-400' : 
+                            status === 'warning' ? 'bg-yellow-400' : 'bg-red-400'
+                        }"></div>
+                        <span class="font-medium text-gray-900">${item.DATASET}</span>
+                    </div>
+                </td>
+                <td class="py-4 px-4 text-gray-700 font-mono">${item.HOURS_SINCE_LAST_RUN}h</td>
+                <td class="py-4 px-4">
+                    <span class="status-${status}">${statusText}</span>
+                </td>
+                <td class="py-4 px-4 text-gray-500 text-sm">${lastUpdate.toLocaleString()}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    // Query Optimization Methods
+    filterQueries() {
+        const actionFilter = document.getElementById('actionFilter').value;
+        const improvementFilter = parseFloat(document.getElementById('improvementFilter').value);
+        const sortBy = document.getElementById('sortBy').value;
+        const searchQuery = document.getElementById('searchQueries').value.toLowerCase();
+
+        let filtered = [...this.queryRewriteResults];
+
+        // Apply filters
+        if (actionFilter) {
+            filtered = filtered.filter(query => query.ACTION === actionFilter);
+        }
+
+        if (improvementFilter > 0) {
+            filtered = filtered.filter(query => query.PCT_MS >= improvementFilter);
+        }
+
+        if (searchQuery) {
+            filtered = filtered.filter(query => 
+                query.ORIG_SQL.toLowerCase().includes(searchQuery) ||
+                query.REWRITE_SQL.toLowerCase().includes(searchQuery) ||
+                query.QUERY_ID.toLowerCase().includes(searchQuery)
+            );
+        }
+
+        // Apply sorting
+        switch(sortBy) {
+            case 'improvement_desc':
+                filtered.sort((a, b) => b.PCT_MS - a.PCT_MS);
+                break;
+            case 'improvement_asc':
+                filtered.sort((a, b) => a.PCT_MS - b.PCT_MS);
+                break;
+            case 'savings_desc':
+                filtered.sort((a, b) => b.EST_USD_SAVINGS - a.EST_USD_SAVINGS);
+                break;
+            case 'date_desc':
+                filtered.sort((a, b) => new Date(b.RUN_DTS) - new Date(a.RUN_DTS));
+                break;
+        }
+
+        this.filteredQueries = filtered;
+        this.currentQueryPage = 1;
+        this.updateResultsInfo();
+        this.renderQueryComparisons();
+    }
+
+    updateResultsInfo() {
+        const resultsCount = document.getElementById('resultsCount');
+        const displayedCount = Math.min(this.currentQueryPage * this.queriesPerPage, this.filteredQueries.length);
+        resultsCount.textContent = `Showing ${displayedCount} of ${this.filteredQueries.length} query optimizations`;
+    }
+
+    renderQueryComparisons() {
+        const container = document.getElementById('queryComparisonList');
+        const startIndex = (this.currentQueryPage - 1) * this.queriesPerPage;
+        const endIndex = startIndex + this.queriesPerPage;
+        const queriesToShow = this.filteredQueries.slice(startIndex, endIndex);
+
+        if (this.currentQueryPage === 1) {
+            container.innerHTML = '';
+        }
+
+        queriesToShow.forEach(query => {
+            const queryElement = this.createQueryComparisonElement(query);
+            container.appendChild(queryElement);
+        });
+
+        // Update load more button
+        const loadMoreBtn = document.getElementById('loadMoreQueries');
+        if (endIndex >= this.filteredQueries.length) {
+            loadMoreBtn.style.display = 'none';
+        } else {
+            loadMoreBtn.style.display = 'block';
+        }
+    }
+
+    createQueryComparisonElement(query) {
+        const container = document.createElement('div');
+        container.className = 'query-comparison-container';
+
+        const headerId = `header-${query.QUERY_ID}`;
+        const detailsId = `details-${query.QUERY_ID}`;
+
+        container.innerHTML = `
+            <div class="query-comparison-header" id="${headerId}">
+                <div class="query-summary">
+                    <div class="query-meta">
+                        <div class="query-id">${query.QUERY_ID.substring(0, 12)}...</div>
+                        <div class="query-metrics">
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.PCT_MS.toFixed(1)}%</div>
+                                <div class="metric-label">Performance</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.PCT_BYTES.toFixed(1)}%</div>
+                                <div class="metric-label">Bytes Saved</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value">${query.BASE_MS}ms</div>
+                                <div class="metric-label">Original</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.TEST_MS}ms</div>
+                                <div class="metric-label">Optimized</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.EST_USD_SAVINGS.toFixed(2)}</div>
+                                <div class="metric-label">Savings</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="action-badge action-${query.ACTION.toLowerCase()}">${query.ACTION}</span>
+                        <svg class="w-5 h-5 expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div class="query-details" id="${detailsId}">
+                <div class="query-comparison-grid">
+                    <div class="query-panel">
+                        <div class="query-panel-header">
+                            <div class="query-panel-title">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                                Original Query
+                            </div>
+                            <div class="query-panel-subtitle">${query.BASE_MS}ms execution</div>
+                        </div>
+                        <div class="code-viewer">${query.ORIG_SQL}</div>
+                    </div>
+                    <div class="query-panel">
+                        <div class="query-panel-header">
+                            <div class="query-panel-title">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                                </svg>
+                                Optimized Query
+                            </div>
+                            <div class="query-panel-subtitle">${query.TEST_MS}ms execution</div>
+                        </div>
+                        <div class="code-editor-container" id="editor-${query.QUERY_ID}"></div>
+                        <div class="query-actions">
+                            <button class="btn btn-primary run-test-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Run Test
+                            </button>
+                            <button class="btn btn-secondary copy-query-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                                Copy Query
+                            </button>
+                            ${query.ACTION === 'ADOPT' ? `
+                            <button class="btn btn-success deploy-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Deploy Optimization
+                            </button>
+                            ` : ''}
+                        </div>
+                        <div id="test-results-${query.QUERY_ID}" class="test-results" style="display: none;">
+                            <div class="test-results-header">Test Results</div>
+                            <div class="test-metrics">
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-time-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Execution Time</div>
+                                </div>
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-improvement-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Improvement</div>
+                                </div>
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-status-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Status</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="performance-comparison">
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.PCT_MS.toFixed(1)}%</div>
+                        <div class="performance-metric-label">Performance Improvement</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.PCT_BYTES.toFixed(1)}%</div>
+                        <div class="performance-metric-label">Bytes Reduction</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${query.TEST_CREDITS_CLOUD.toFixed(3)}</div>
+                        <div class="performance-metric-label">Credits Used</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.EST_USD_SAVINGS.toFixed(2)}</div>
+                        <div class="performance-metric-label">Estimated Savings</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${query.WAREHOUSE_NAME}</div>
+                        <div class="performance-metric-label">Warehouse</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${new Date(query.RUN_DTS).toLocaleDateString()}</div>
+                        <div class="performance-metric-label">Analysis Date</div>
+                    </div>
+                </div>
+
+                ${query.LLM_RATIONALE ? `
+                <div class="llm-rationale">
+                    <div class="llm-rationale-header">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                        <span class="llm-rationale-title">Claude 4 Sonnet Analysis</span>
+                    </div>
+                    <div class="llm-rationale-content">${query.LLM_RATIONALE}</div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Add event listeners
+        const header = container.querySelector(`#${headerId}`);
+        header.addEventListener('click', () => {
+            this.toggleQueryDetails(query.QUERY_ID);
+        });
+
+        return container;
+    }
+
+    toggleQueryDetails(queryId) {
+        const header = document.getElementById(`header-${queryId}`);
+        const details = document.getElementById(`details-${queryId}`);
+        const icon = header.querySelector('.expand-icon');
+
+        if (details.classList.contains('expanded')) {
+            details.classList.remove('expanded');
+            header.classList.remove('expanded');
+            icon.classList.remove('expanded');
+        } else {
+            details.classList.add('expanded');
+            header.classList.add('expanded');
+            icon.classList.add('expanded');
+            
+            // Initialize Monaco editor for this query if not already done
+            this.initializeQueryEditor(queryId);
+            this.setupQueryActions(queryId);
+        }
+    }
+
+    initializeQueryEditor(queryId) {
+        const editorContainer = document.getElementById(`editor-${queryId}`);
+        if (editorContainer.querySelector('.monaco-editor') || editorContainer.querySelector('textarea')) {
+            return; // Already initialized
+        }
+
+        const query = this.queryRewriteResults.find(q => q.QUERY_ID === queryId);
+        if (!query) return;
+
+        const editor = this.createMonacoEditor(editorContainer, query.REWRITE_SQL, false);
+        
+        // Store editor reference
+        if (!this.monacoEditors) this.monacoEditors = {};
+        this.monacoEditors[queryId] = editor;
+    }
+
+    setupQueryActions(queryId) {
+        const runTestBtn = document.querySelector(`[data-query-id="${queryId}"].run-test-btn`);
+        const copyQueryBtn = document.querySelector(`[data-query-id="${queryId}"].copy-query-btn`);
+        const deployBtn = document.querySelector(`[data-query-id="${queryId}"].deploy-btn`);
+
+        if (runTestBtn && !runTestBtn.hasAttribute('data-listener-added')) {
+            runTestBtn.addEventListener('click', () => this.runQueryTest(queryId));
+            runTestBtn.setAttribute('data-listener-added', 'true');
+        }
+
+        if (copyQueryBtn && !copyQueryBtn.hasAttribute('data-listener-added')) {
+            copyQueryBtn.addEventListener('click', () => this.copyQuery(queryId));
+            copyQueryBtn.setAttribute('data-listener-added', 'true');
+        }
+
+        if (deployBtn && !deployBtn.hasAttribute('data-listener-added')) {
+            deployBtn.addEventListener('click', () => this.deployOptimization(queryId));
+            deployBtn.setAttribute('data-listener-added', 'true');
+        }
+    }
+
+    async runQueryTest(queryId) {
+        const runTestBtn = document.querySelector(`[data-query-id="${queryId}"].run-test-btn`);
+        const testResults = document.getElementById(`test-results-${queryId}`);
+        const testTime = document.getElementById(`test-time-${queryId}`);
+        const testImprovement = document.getElementById(`test-improvement-${queryId}`);
+        const testStatus = document.getElementById(`test-status-${queryId}`);
+
+        // Show loading state
+        runTestBtn.disabled = true;
+        runTestBtn.innerHTML = `
+            <svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Running Test...
+        `;
+        testResults.style.display = 'block';
+        testStatus.innerHTML = '<span class="query-status status-running">Running</span>';
+
+        try {
+            // Get the current query from the editor
+            const editor = this.monacoEditors && this.monacoEditors[queryId];
+            const currentQuery = editor ? editor.getValue() : '';
+            
+            // Simulate query execution with realistic timing
+            await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
+            
+            // Generate realistic test results
+            const originalQuery = this.queryRewriteResults.find(q => q.QUERY_ID === queryId);
+            const variation = 0.8 + Math.random() * 0.4; // 80% to 120% of expected performance
+            const testTimeMs = Math.floor(originalQuery.TEST_MS * variation);
+            const actualImprovement = ((originalQuery.BASE_MS - testTimeMs) / originalQuery.BASE_MS * 100);
+            
+            testTime.textContent = `${testTimeMs}ms`;
+            testImprovement.textContent = `${actualImprovement.toFixed(1)}%`;
+            testImprovement.className = 'test-metric-value ' + (actualImprovement > 0 ? 'improvement' : 'warning');
+            
+            // Determine status based on performance
+            let status = 'success';
+            let statusText = 'Success';
+            if (actualImprovement < 0) {
+                status = 'error';
+                statusText = 'Slower';
+            } else if (actualImprovement < 5) {
+                status = 'warning';
+                statusText = 'Marginal';
+            }
+            
+            testStatus.innerHTML = `<span class="query-status status-${status}">${statusText}</span>`;
+
+        } catch (error) {
+            testStatus.innerHTML = '<span class="query-status status-error">Error</span>';
+            testTime.textContent = 'Failed';
+            testImprovement.textContent = '--';
+        } finally {
+            // Reset button
+            runTestBtn.disabled = false;
+            runTestBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Run Test
+            `;
+        }
+    }
+
+    async copyQuery(queryId) {
+        const copyBtn = document.querySelector(`[data-query-id="${queryId}"].copy-query-btn`);
+        const editor = this.monacoEditors && this.monacoEditors[queryId];
+        const queryText = editor ? editor.getValue() : '';
+
+        try {
+            await navigator.clipboard.writeText(queryText);
+            
+            // Show success feedback
+            const originalText = copyBtn.innerHTML;
+            copyBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                Copied!
+            `;
+            copyBtn.className = 'btn btn-success copy-query-btn';
+            
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+                copyBtn.className = 'btn btn-secondary copy-query-btn';
+            }, 2000);
+            
+        } catch (error) {
+            console.error('Failed to copy query:', error);
+        }
+    }
+
+    async deployOptimization(queryId) {
+        const deployBtn = document.querySelector(`[data-query-id="${queryId}"].deploy-btn`);
+        
+        // Show confirmation dialog (in a real app, this would be a proper modal)
+        if (!confirm('Are you sure you want to deploy this optimization? This will replace the original query in your system.')) {
+            return;
+        }
+
+        // Show loading state
+        deployBtn.disabled = true;
+        deployBtn.innerHTML = `
+            <svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Deploying...
+        `;
+
+        try {
+            // Simulate deployment
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Show success state
+            deployBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                Deployed Successfully
+            `;
+            deployBtn.className = 'btn btn-success deploy-btn';
+            
+            // Generate a success alert
+            this.alerts.unshift({
+                type: 'info',
+                title: 'Optimization Deployed',
+                description: `Query optimization for ${queryId.substring(0, 16)}... has been successfully deployed`,
+                timestamp: new Date(),
+                metric: 'optimization'
+            });
+            
+            this.renderAlerts();
+            
+        } catch (error) {
+            deployBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+                Deployment Failed
+            `;
+            deployBtn.className = 'btn btn-danger deploy-btn';
+        }
+    }
+
+    loadMoreQueries() {
+        this.currentQueryPage++;
+        this.renderQueryComparisons();
+        this.updateResultsInfo();
+    }
+
+    generateAlerts() {
+        this.alerts = [];
+
+        // Cost surge detection
+        const dailySpends = this.data.costPerCredit.reduce((acc, item) => {
+            const date = new Date(item.USAGE_DATE).toISOString().split('T')[0];
+            if (!acc[date]) acc[date] = 0;
+            acc[date] += item.SPEND_USD;
+            return acc;
+        }, {});
+
+        const spends = Object.values(dailySpends);
+        const mean = spends.reduce((sum, val) => sum + val, 0) / spends.length;
+        const variance = spends.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / spends.length;
+        const stdDev = Math.sqrt(variance);
+
+        Object.entries(dailySpends).forEach(([date, spend]) => {
+            if (spend > mean + 3 * stdDev) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'Cost Surge Detected',
+                    description: `Daily spend of ${spend.toFixed(2)} exceeds threshold by ${((spend - mean) / stdDev).toFixed(1)}σ`,
+                    timestamp: new Date(date),
+                    metric: 'cost'
+                });
+            }
+        });
+
+        // Idle waste detection
+        this.data.idleActiveRatio.forEach(warehouse => {
+            if (warehouse.QUEUED_PCT > 0.7) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'High Queue Time',
+                    description: `${warehouse.WAREHOUSE_NAME} has ${(warehouse.QUEUED_PCT * 100).toFixed(1)}% queued time`,
+                    timestamp: new Date(),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Query performance alerts
+        const p95Values = this.data.queryPerformance.map(item => item.P95_EXEC_SEC);
+        const p95Median = p95Values.sort((a, b) => a - b)[Math.floor(p95Values.length / 2)];
+        const p95Variance = p95Values.reduce((sum, val) => sum + Math.pow(val - p95Median, 2), 0) / p95Values.length;
+        const p95StdDev = Math.sqrt(p95Variance);
+
+        this.data.queryPerformance.forEach(item => {
+            if (item.P95_EXEC_SEC > p95Median + 2 * p95StdDev) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'Slow Query Spike',
+                    description: `P95 execution time of ${item.P95_EXEC_SEC.toFixed(2)}s exceeds normal range`,
+                    timestamp: new Date(item.USAGE_DATE),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Query failure spikes
+        this.data.queryFailureRate.forEach(item => {
+            if (item.FAILURE_RATE > 0.05) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'High Query Failure Rate',
+                    description: `Failure rate of ${(item.FAILURE_RATE * 100).toFixed(1)}% exceeds 5% threshold`,
+                    timestamp: new Date(item.USAGE_DATE),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Connector SLA breaches
+        this.data.connectorHealth.forEach(item => {
+            if (item.SLA_BREACHES > 0) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'Connector SLA Breach',
+                    description: `${item.CONNECTOR} had ${item.SLA_BREACHES} SLA breaches`,
+                    timestamp: new Date(item.RUN_DATE),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // Stale datasets
+        this.data.dataFreshness.forEach(item => {
+            if (item.HOURS_SINCE_LAST_RUN > 12) {
+                this.alerts.push({
+                    type: 'info',
+                    title: 'Stale Dataset',
+                    description: `${item.DATASET} hasn't been updated for ${item.HOURS_SINCE_LAST_RUN} hours`,
+                    timestamp: new Date(),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // API anomalies
+        this.data.apiZscore.forEach(item => {
+            if (Math.abs(item.ZSCORE) >= 3) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'API Call Anomaly',
+                    description: `API calls (${item.API_CALLS}) show unusual pattern (z-score: ${item.ZSCORE.toFixed(2)})`,
+                    timestamp: new Date(item.RUN_DATE),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // Query optimization opportunities
+        if (this.queryRewriteResults.length > 0) {
+            const highImpactQueries = this.queryRewriteResults.filter(q => q.PCT_MS > 70 && q.ACTION === 'ADOPT');
+            if (highImpactQueries.length > 0) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'High-Impact Optimizations Available',
+                    description: `${highImpactQueries.length} queries show >50% performance improvement potential`,
+                    timestamp: new Date(),
+                    metric: 'optimization'
+                });
+            }
+
+            const totalSavings = this.queryRewriteResults
+                .filter(q => q.ACTION === 'ADOPT')
+                .reduce((sum, q) => sum + q.EST_USD_SAVINGS, 0);
+            
+            if (totalSavings > 100) {
+                this.alerts.push({
+                    type: 'info',
+                    title: 'Significant Cost Savings Available',
+                    description: `Implementing recommended optimizations could save ${totalSavings.toFixed(2)}`,
+                    timestamp: new Date(),
+                    metric: 'optimization'
+                });
+            }
+        }
+
+        // Sort alerts by timestamp (newest first)
+        this.alerts.sort((a, b) => b.timestamp - a.timestamp);
+        
+        this.renderAlerts();
+    }
+
+    renderAlerts() {
+        const alertsList = document.getElementById('alertsList');
+        alertsList.innerHTML = '';
+
+        const visibleAlerts = this.alerts.slice(0, 5);
+        
+        visibleAlerts.forEach(alert => {
+            const alertElement = document.createElement('div');
+            alertElement.className = `alert-item alert-${alert.type} fade-in`;
+            alertElement.innerHTML = `
+                <div class="alert-title">${alert.title}</div>
+                <div class="alert-description">${alert.description}</div>
+                <div class="alert-timestamp">${alert.timestamp.toLocaleString()}</div>
+            `;
+            alertsList.appendChild(alertElement);
+        });
+
+        const showMoreButton = document.getElementById('showMoreAlerts');
+        showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
+    }
+
+    showMoreAlerts() {
+        const alertsList = document.getElementById('alertsList');
+        const hiddenAlerts = this.alerts.slice(5);
+        
+        hiddenAlerts.forEach(alert => {
+            const alertElement = document.createElement('div');
+            alertElement.className = `alert-item alert-${alert.type} fade-in`;
+            alertElement.innerHTML = `
+                <div class="alert-title">${alert.title}</div>
+                <div class="alert-description">${alert.description}</div>
+                <div class="alert-timestamp">${alert.timestamp.toLocaleString()}</div>
+            `;
+            alertsList.appendChild(alertElement);
+        });
+
+        document.getElementById('showMoreAlerts').style.display = 'none';
+    }
+
+    toggleSidebar() {
+        const sidebar = document.getElementById('alertsSidebar');
+        sidebar.classList.toggle('sidebar-collapsed');
+    }
+
+    setupTooltips() {
+        const tooltip = document.getElementById('tooltip');
+        const tooltipContent = tooltip.querySelector('.tooltip-content');
+
+        document.querySelectorAll('[data-tooltip]').forEach(element => {
+            element.addEventListener('mouseenter', (e) => {
+                const text = e.target.getAttribute('data-tooltip');
+                tooltipContent.textContent = text;
+                tooltip.classList.add('visible');
+                
+                const rect = e.target.getBoundingClientRect();
+                tooltip.style.left = rect.left + 'px';
+                tooltip.style.top = (rect.top - tooltip.offsetHeight - 10) + 'px';
+            });
+
+            element.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('visible');
+            });
+        });
+    }
+}
+
+// Initialize dashboard when DOM is loaded and libraries are available
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for libraries to load
+    function waitForLibraries() {
+        if (typeof ApexCharts !== 'undefined' && 
+            (typeof domo !== 'undefined' || typeof window.domo !== 'undefined')) {
+            window.dashboard = new SnowDomoDashboard();
+        } else {
+            setTimeout(waitForLibraries, 100);
+        }
+    }
+    
+    waitForLibraries();
+});

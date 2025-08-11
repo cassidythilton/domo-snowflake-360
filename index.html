@@ -1,0 +1,853 @@
+<html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snow-Domo 360</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.42.0/apexcharts.min.js"></script>
+    <script src="https://unpkg.com/ryuu.js@4.6.0/dist/domo.js" integrity="sha384-YYsd9wQ+wDlUWhvpfGdptxmNYIqBC+52oJtWgPKJadbs3sSFTY/+ZotPbEHTTRWz" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.3/d3.min.js"></script>
+    <script src="https://unpkg.com/@observablehq/plot@0.6.4/dist/plot.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs/loader.min.js"></script>
+    <link rel="stylesheet" href="app.css">
+</head>
+<body class="bg-gray-50 font-inter antialiased">
+    <div class="flex h-screen">
+        <!-- Dark Sidebar -->
+        <aside class="w-64 bg-gray-900 text-white flex flex-col">
+            <div class="p-6 border-b border-gray-800">
+                <div class="flex items-center space-x-3">
+                    <img src="https://cdn.brandfetch.io/idJz-fGD_q/theme/dark/symbol.svg?c=1dxbfHSJFAPEGdCLU4o5B" alt="Snowflake" class="w-8 h-8">
+                    <div>
+                        <h1 class="text-xl font-bold">Snow-Domo 360</h1>
+                        <p class="text-xs text-gray-400">Pipeline Observability</p>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="flex-1 p-4">
+                <ul class="space-y-2">
+                    <li>
+                        <button class="nav-item active" data-tab="cost">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"></path>
+                            </svg>
+                            Cost &amp; Credits
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-item" data-tab="performance">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                            Performance &amp; Reliability
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-item" data-tab="pipeline">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+                            </svg>
+                            Pipeline Health
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-item" data-tab="adoption">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                            </svg>
+                            Adoption &amp; Utilization
+                        </button>
+                    </li>
+                    <li>
+                        <button class="nav-item" data-tab="optimization">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                            </svg>
+                            AI Query Optimization
+                        </button>
+                    </li>
+                </ul>
+            </nav>
+
+            <div class="p-4 border-t border-gray-800 space-y-3">
+                <div class="flex items-center space-x-2">
+                    <span id="dataMode" class="px-2 py-1 rounded-full text-xs font-medium bg-orange-500 text-white">Mock Data</span>
+                    <button id="dataToggle" class="text-xs text-gray-400 hover:text-white transition-colors">
+                        Switch to Live
+                    </button>
+                </div>
+                <button id="themeToggle" class="theme-toggle w-full">
+                    <svg class="theme-toggle-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                    <span class="theme-toggle-text">Dark Mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <!-- Top Header -->
+            <header class="bg-white border-b border-gray-200 px-8 py-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 id="pageTitle" class="text-2xl font-bold text-gray-900">Cost &amp; Credits</h2>
+                        <p class="text-sm text-gray-600 mt-1">Monitor spend patterns and resource utilization</p>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center space-x-2">
+                            <label class="text-sm font-medium text-gray-700">Period:</label>
+                            <select id="dateRange" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                <option value="30">Last 30 days</option>
+                                <option value="60">Last 60 days</option>
+                                <option value="90">Last 90 days</option>
+                                <option value="180">Last 180 days</option>
+                            </select>
+                        </div>
+                        <button id="refreshBtn" class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="flex-1 overflow-auto">
+                <!-- Cost & Credits Tab -->
+                <div id="tab-cost" class="tab-content active p-8 space-y-8">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="metric-card" data-tooltip="Total spend in USD over the selected period">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Total Spend</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="totalSpend">$1,234.56</p>
+                                        <p class="text-sm text-green-600 mt-1">+5.2% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-green-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT SUM(SPEND_USD)
+FROM OBS_COST_PER_CREDIT
+WHERE USAGE_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Average daily credits consumed">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Daily Credits Avg</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="avgCredits">892.3</p>
+                                        <p class="text-sm text-red-600 mt-1">-2.1% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-blue-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(CREDITS)
+FROM OBS_COST_PER_CREDIT
+GROUP BY USAGE_DATE</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Number of active warehouses">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Active Warehouses</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="activeWarehouses">12</p>
+                                        <p class="text-sm text-gray-500 mt-1">No change</p>
+                                    </div>
+                                    <div class="p-3 bg-purple-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h1a1 1 0 011 1v5m-4 0h4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(DISTINCT WAREHOUSE_NAME)
+FROM OBS_CREDITS_BY_WAREHOUSE
+WHERE USAGE_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Average cost efficiency score">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Efficiency Score</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="efficiencyScore">87.2%</p>
+                                        <p class="text-sm text-green-600 mt-1">+1.8% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-emerald-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(ACTIVE_PCT)
+FROM OBS_IDLE_ACTIVE_RATIO
+WHERE ACTIVE_PCT &gt; 0</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Chart -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Daily Credits by Service Type</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Last 30 days</span>
+                            </div>
+                        </div>
+                        <div id="creditsChart" class="h-80"></div>
+                    </div>
+
+                    <!-- Two Column Layout for Supporting Charts -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Cost Distribution</h3>
+                            <div id="warehouseTreemap" class="h-80"></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Utilization</h3>
+                            <div id="utilizationChart" class="h-80"></div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Table -->
+                    <div class="chart-card">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 10 Datasets by Cost</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full" id="datasetCostTable">
+                                <thead>
+                                    <tr class="border-b border-gray-200">
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Credits</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Cost (USD)</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Trend</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="datasetCostBody" class="divide-y divide-gray-100">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance & Reliability Tab -->
+                <div id="tab-performance" class="tab-content p-8 space-y-8">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="metric-card" data-tooltip="95th percentile query execution time">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">P95 Query Time</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="p95QueryTime">0.42s</p>
+                                        <p class="text-sm text-green-600 mt-1">-8.3% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-blue-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(P95_EXEC_SEC)
+FROM OBS_QUERY_PERFORMANCE
+WHERE USAGE_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Percentage of queries that failed">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Query Failure Rate</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="queryFailureRate">1.2%</p>
+                                        <p class="text-sm text-red-600 mt-1">+0.3% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-red-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 15.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(FAILURE_RATE)
+FROM OBS_QUERY_FAILURE_RATE
+WHERE USAGE_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Number of warehouse events today">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Warehouse Events</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="warehouseEvents">23</p>
+                                        <p class="text-sm text-gray-500 mt-1">Today</p>
+                                    </div>
+                                    <div class="p-3 bg-yellow-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(*)
+FROM OBS_WAREHOUSE_EVENTS
+WHERE DATE(EVENT_TS) = CURRENT_DATE</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Average warehouse load efficiency">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Load Efficiency</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="loadEfficiency">94.8%</p>
+                                        <p class="text-sm text-green-600 mt-1">+2.1% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-green-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(ACTIVE_PCT)
+FROM OBS_IDLE_ACTIVE_RATIO
+WHERE ACTIVE_PCT &gt; 0</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Charts -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">P95 Query Duration Trend</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    SLA: 1.0s
+                                </span>
+                            </div>
+                        </div>
+                        <div id="queryPerformanceChart" class="h-80"></div>
+                    </div>
+
+                    <!-- Query Performance Analysis Bee Swarm -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Query Performance Analysis</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Interactive visualization</span>
+                            </div>
+                        </div>
+                        <div id="querySwarmLayout" class="h-96">
+                            <div id="querySwarmChart" class="w-full h-full"></div>
+                            <div id="querySwarmPanel" class="hidden"></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Query Failure Rate Trend</h3>
+                            <div id="failureRateChart" class="h-80"></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Events Timeline</h3>
+                            <div id="warehouseEventsChart" class="h-80"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pipeline Health Tab -->
+                <div id="tab-pipeline" class="tab-content p-8 space-y-8">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="metric-card" data-tooltip="Overall connector success percentage">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Connector Success</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="connectorSuccess">98.7%</p>
+                                        <p class="text-sm text-green-600 mt-1">+0.5% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-green-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(SUCCESS_PCT)
+FROM OBS_DOMO_CONNECTOR_HEALTH
+WHERE RUN_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Total SLA breaches in the period">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">SLA Breaches</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="slaBreaches">8</p>
+                                        <p class="text-sm text-red-600 mt-1">+3 vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-red-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 15.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT SUM(SLA_BREACHES)
+FROM OBS_DOMO_CONNECTOR_HEALTH
+WHERE RUN_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Number of stale datasets (&gt;24h)">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Stale Datasets</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="staleDatasets">3</p>
+                                        <p class="text-sm text-orange-600 mt-1">Needs attention</p>
+                                    </div>
+                                    <div class="p-3 bg-orange-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(*)
+FROM OBS_DOMO_DATA_FRESHNESS
+WHERE HOURS_SINCE_LAST_RUN &gt; 24</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Average daily bytes ingested (MB)">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Daily Bytes (MB)</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="dailyBytes">1,024</p>
+                                        <p class="text-sm text-green-600 mt-1">+12.5% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-blue-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(AVG_BYTES_INSERTED)/1048576
+FROM OBS_DOMO_DAILY_BYTES
+WHERE RUN_DATE &gt;= :start_date</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Charts -->
+                    <div class="chart-card">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Bytes Ingested &amp; API Anomalies</h3>
+                        <div id="bytesApiChart" class="h-80"></div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Connector Success Rate</h3>
+                            <div id="connectorSuccessChart" class="h-80"></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">SLA Breaches Heatmap</h3>
+                            <div id="slaHeatmapChart" class="h-80"></div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Table -->
+                    <div class="chart-card">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Data Freshness Status</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full" id="freshnessTable">
+                                <thead>
+                                    <tr class="border-b border-gray-200">
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Hours Since Last Run</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Status</th>
+                                        <th class="text-left py-3 px-4 font-semibold text-gray-900">Last Update</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="freshnessBody" class="divide-y divide-gray-100">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Adoption & Utilization Tab -->
+                <div id="tab-adoption" class="tab-content p-8 space-y-8">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="metric-card" data-tooltip="Weekly active Snowflake users">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Weekly Active Users</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="weeklyActiveUsers">119</p>
+                                        <p class="text-sm text-green-600 mt-1">+7.2% vs last week</p>
+                                    </div>
+                                    <div class="p-3 bg-indigo-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT WAU
+FROM OBS_SNOWFLAKE_WAU
+ORDER BY ISO_WEEK DESC LIMIT 1</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Distinct datasets accessed">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Active Datasets</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="activeDatasets">47</p>
+                                        <p class="text-sm text-gray-500 mt-1">This period</p>
+                                    </div>
+                                    <div class="p-3 bg-teal-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(DISTINCT DATASET_NAME)
+FROM OBS_DATASET_CREDIT_COST
+WHERE CREDITS &gt; 0</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Number of active connectors">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Active Connectors</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="activeConnectors">18</p>
+                                        <p class="text-sm text-green-600 mt-1">+2 vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-cyan-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(DISTINCT CONNECTOR)
+FROM OBS_DOMO_CONNECTOR_HEALTH
+WHERE SUCCESS_PCT &gt; 0</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card" data-tooltip="Cost per active user (USD)">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm text-gray-600 font-medium">Cost per User</p>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="costPerUser">$10.37</p>
+                                        <p class="text-sm text-red-600 mt-1">-2.1% vs last period</p>
+                                    </div>
+                                    <div class="p-3 bg-pink-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT total_cost / wau
+FROM cost_summary, wau_summary
+WHERE period = :current_period</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Width Charts -->
+                    <div class="chart-card">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 5 Connectors by Rows Ingested</h3>
+                        <div id="topConnectorsChart" class="h-80"></div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Weekly Active Users Trend</h3>
+                        <div id="wauTrendChart" class="h-80"></div>
+                    </div>
+
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Credits vs Users Correlation</h3>
+                            <div id="creditsUsersChart" class="h-80"></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Dataset Cost Distribution</h3>
+                            <div id="datasetCostChart" class="h-80"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Query Optimization Tab -->
+                <div id="tab-optimization" class="tab-content p-6 space-y-6">
+                    <!-- KPI Cards Row -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="metric-card compact" data-tooltip="Total number of queries analyzed by Claude 4 Sonnet">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-xs text-gray-600 font-medium">Total Queries Analyzed</p>
+                                        <p class="text-2xl font-bold text-gray-900 mt-1" id="totalQueriesAnalyzed">47</p>
+                                        <p class="text-xs text-green-600 mt-1">+12 this week</p>
+                                    </div>
+                                    <div class="p-2 bg-purple-100 rounded-lg">
+                                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT COUNT(DISTINCT QUERY_ID)
+FROM QUERY_REWRITE_RESULTS
+WHERE RUN_DTS &gt;= :start_date</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card compact" data-tooltip="Average performance improvement across all optimized queries">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-xs text-gray-600 font-medium">Avg Performance Improvement</p>
+                                        <p class="text-2xl font-bold text-gray-900 mt-1" id="avgPerformanceImprovement">34.2%</p>
+                                        <p class="text-xs text-green-600 mt-1">Exceeds 25% target</p>
+                                    </div>
+                                    <div class="p-2 bg-green-100 rounded-lg">
+                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT AVG(PCT_MS)
+FROM QUERY_REWRITE_RESULTS
+WHERE ACTION IN ('ADOPT', 'BENCH_TEST')</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card compact" data-tooltip="Estimated total credits saved from query optimizations">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-xs text-gray-600 font-medium">Est. Credits Saved</p>
+                                        <p class="text-2xl font-bold text-gray-900 mt-1" id="estimatedCreditsSaved">892.7</p>
+                                        <p class="text-xs text-green-600 mt-1">$892.70 USD value</p>
+                                    </div>
+                                    <div class="p-2 bg-blue-100 rounded-lg">
+                                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT SUM(EST_USD_SAVINGS)
+FROM QUERY_REWRITE_RESULTS
+WHERE ACTION = 'ADOPT'</pre>
+                            </div>
+                        </div>
+
+                        <div class="metric-card compact" data-tooltip="Percentage of optimizations recommended for adoption">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-xs text-gray-600 font-medium">Adoption Rate</p>
+                                        <p class="text-2xl font-bold text-gray-900 mt-1" id="adoptionRate">68.1%</p>
+                                        <p class="text-xs text-green-600 mt-1">High confidence optimizations</p>
+                                    </div>
+                                    <div class="p-2 bg-emerald-100 rounded-lg">
+                                        <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="metric-back">
+                                <pre class="text-xs text-gray-600 font-mono">SELECT 
+  COUNT(CASE WHEN ACTION='ADOPT' THEN 1 END) * 100.0 
+  / COUNT(*) as adoption_rate
+FROM QUERY_REWRITE_RESULTS</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Compact Charts Row -->
+                    <div class="optimization-charts-row">
+                        <div class="chart-card compact">
+                            <h3 class="text-gray-700 font-medium">Performance Distribution</h3>
+                            <div id="improvementDistributionChart" class="h-44"></div>
+                        </div>
+                        <div class="chart-card compact">
+                            <h3 class="text-gray-700 font-medium">Action Breakdown</h3>
+                            <div id="actionBreakdownChart" class="h-44"></div>
+                        </div>
+                        <div class="chart-card compact">
+                            <h3 class="text-gray-700 font-medium">Savings Timeline</h3>
+                            <div id="savingsOverTimeChart" class="h-44"></div>
+                        </div>
+                    </div>
+
+                    <!-- Query Filters -->
+                    <div class="query-filters">
+                        <div class="filter-row">
+                            <div class="filter-group">
+                                <label class="filter-label">Filter by Action:</label>
+                                <select id="actionFilter" class="filter-select">
+                                    <option value="">All Actions</option>
+                                    <option value="ADOPT">Adopt</option>
+                                    <option value="BENCH_TEST">Bench Test</option>
+                                    <option value="IGNORE">Ignore</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label class="filter-label">Min Improvement:</label>
+                                <select id="improvementFilter" class="filter-select">
+                                    <option value="0">Any</option>
+                                    <option value="5">5%+</option>
+                                    <option value="10">10%+</option>
+                                    <option value="25">25%+</option>
+                                    <option value="50">50%+</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label class="filter-label">Sort by:</label>
+                                <select id="sortBy" class="filter-select">
+                                    <option value="improvement_desc">Improvement ↓</option>
+                                    <option value="improvement_asc">Improvement ↑</option>
+                                    <option value="savings_desc">Savings ↓</option>
+                                    <option value="date_desc">Date ↓</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <input type="text" id="searchQueries" class="search-input" placeholder="Search queries...">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results Info -->
+                    <div class="results-info">
+                        <span id="resultsCount">Showing 15 of 47 query optimizations</span>
+                        <span class="text-xs text-gray-500">Powered by Claude 4 Sonnet</span>
+                    </div>
+
+                    <!-- Query Comparison List -->
+                    <div id="queryComparisonList" class="space-y-6">
+                        <!-- Query comparisons will be populated by JavaScript -->
+                    </div>
+
+                    <!-- Load More Button -->
+                    <div class="text-center">
+                        <button id="loadMoreQueries" class="btn btn-secondary">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                            Load More Queries
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Alerts Sidebar -->
+        <aside id="alertsSidebar" class="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-semibold text-gray-900">Alerts &amp; Recommendations</h2>
+                <button id="closeSidebar" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <div id="alertsList" class="space-y-4">
+                <!-- Alerts will be populated by JavaScript -->
+            </div>
+
+            <button id="showMoreAlerts" class="w-full mt-6 px-4 py-2 text-sm text-brand-600 hover:text-brand-800 font-medium border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
+                Show more alerts
+            </button>
+        </aside>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip">
+        <div class="tooltip-content"></div>
+    </div>
+
+    <!-- Query Details Modal -->
+    <div id="queryModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black bg-opacity-50" id="modalBackdrop"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-96 overflow-hidden">
+                <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-900">Query Details</h2>
+                    <button id="closeModal" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div id="queryDetails" class="p-6 overflow-y-auto max-h-80">
+                    <!-- Query details will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+
+</body></html>
