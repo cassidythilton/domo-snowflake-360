@@ -558,7 +558,15 @@ WHERE RUN_DATE &gt;= :start_date</pre>
 
                     <!-- Full Width Charts -->
                     <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Bytes Ingested &amp; API Anomalies</h3>
+                        <div class="flex items-start justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Bytes Ingested &amp; API Anomalies</h3>
+                            <div class="flex items-end space-x-2 max-w-md ml-4">
+                                <span class="text-gray-500 text-right leading-relaxed" style="font-size: 10px;">
+                                    Daily bytes ingested with API Z-score (right axis). Z-score = how many standard deviations today's API calls are from the recent mean.
+                                    Values beyond ±2 indicate likely anomalies.
+                                </span>
+                            </div>
+                        </div>
                         <div id="bytesApiChart" class="h-80"></div>
                     </div>
 
@@ -584,18 +592,7 @@ WHERE RUN_DATE &gt;= :start_date</pre>
                         </div>
                     </div>
 
-                    <!-- Record Freshness vs Last Run Delta -->
-                    <div class="grid grid-cols-1 gap-8">
-                        <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
-                                <h3 class="text-lg font-semibold text-gray-900">Record Freshness vs Last Run</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Delta analysis</span>
-                                </div>
-                            </div>
-                            <div id="freshnessDeltaBar" class="h-80"></div>
-                        </div>
-                    </div>
+
 
                     <!-- Data Freshness Status full-width row -->
                     <div class="grid grid-cols-1 gap-8">

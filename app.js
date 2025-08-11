@@ -425,11 +425,7 @@ class SnowDomoDashboard {
             });
         });
 
-        // Flatten dataFreshness into domoDataFreshness for delta compare
-        this.data.domoDataFreshness = this.data.dataFreshness.map(d => ({
-            DATASET: d.DATASET,
-            HOURS_SINCE_LAST_RUN: d.HOURS_SINCE_LAST_RUN
-        }));
+
 
         // OBS_DATASET_CREDIT_COST
         this.data.datasetCreditCost = [
@@ -457,12 +453,26 @@ class SnowDomoDashboard {
             AVG_BYTES_INSERTED: Math.random() * 500000 + 800000
         }));
 
-        // OBS_DOMO_API_ZSCORE
-        this.data.apiZscore = dates.map(date => ({
+        // OBS_DOMO_API_ZSCORE - more realistic anomaly patterns
+        this.data.apiZscore = dates.map((date, index) => {
+            // Most values are in normal range (-2 to +2)
+            let zscore = (Math.random() - 0.5) * 4;
+            
+            // Inject some anomalies (8% chance)
+            if (Math.random() < 0.08) {
+                zscore = (Math.random() > 0.5 ? 1 : -1) * (2.5 + Math.random() * 2.5);
+            }
+            
+            // Base API calls with some variation
+            const baseApiCalls = 2800 + (Math.sin(index * 0.15) * 400);
+            const apiCalls = Math.max(1000, Math.round(baseApiCalls + zscore * 200));
+            
+            return {
             RUN_DATE: date,
-            API_CALLS: Math.random() * 1000 + 2500,
-            ZSCORE: (Math.random() - 0.5) * 6
-        }));
+                API_CALLS: apiCalls,
+                ZSCORE: parseFloat(zscore.toFixed(2))
+            };
+        });
 
         // OBS_DOMO_CONNECTOR_RUNS (with derived metrics for slowest runs table)
         this.data.connectorRuns = [];
@@ -1963,18 +1973,18 @@ ORDER BY total_users DESC`,
             series,
             chart: { 
                 type: 'scatter', 
-                height: 320, 
+                height: 320,
                 fontFamily: 'Inter, sans-serif', 
                 toolbar: { show: false },
                 zoom: { enabled: true, type: 'xy' }
             },
-            markers: { 
+            markers: {
                 size: [3, 3, 3, 5, 5, 5], // Small for normal, slightly larger for anomalies
                 strokeWidth: [0, 0, 0, 1, 1, 1],
                 hover: { size: [5, 5, 5, 7, 7, 7] }
             },
             xaxis: { 
-                type: 'datetime', 
+                type: 'datetime',
                 labels: { 
                     style: { colors: '#6b7280', fontSize: '11px' },
                     formatter: function(val) {
@@ -2000,7 +2010,7 @@ ORDER BY total_users DESC`,
                 yaxis: { lines: { show: true } }
             },
             legend: { 
-                position: 'top', 
+                position: 'top',
                 horizontalAlign: 'right', 
                 labels: { colors: '#374151' },
                 markers: { width: 8, height: 8 }
@@ -2189,16 +2199,18 @@ ORDER BY total_users DESC`,
             series: [{
                 name: 'Bytes Ingested (MB)',
                 type: 'area',
+                yAxisIndex: 0,
                 data: this.data.dailyBytes.map(item => ({
                     x: item.RUN_DATE,
-                    y: (item.AVG_BYTES_INSERTED / 1048576).toFixed(2)
+                    y: parseFloat((item.AVG_BYTES_INSERTED / 1048576).toFixed(2))
                 }))
             }, {
                 name: 'API Z-Score',
                 type: 'scatter',
+                yAxisIndex: 1,
                 data: this.data.apiZscore.map(item => ({
                     x: item.RUN_DATE,
-                    y: item.ZSCORE
+                    y: parseFloat(item.ZSCORE.toFixed(2))
                 }))
             }],
             chart: { 
@@ -2209,6 +2221,12 @@ ORDER BY total_users DESC`,
             stroke: { 
                 curve: 'smooth',
                 width: [3, 0]
+            },
+            markers: {
+                size: [0, 4],
+                strokeWidth: [0, 1],
+                strokeColors: ['transparent', '#95CBEE'],
+                hover: { size: [0, 6] }
             },
             fill: {
                 type: ['gradient', 'solid'],
@@ -2240,13 +2258,48 @@ ORDER BY total_users DESC`,
             },
             annotations: {
                 yaxis: [{
+                    y: 2,
+                    y2: -2,
+                    yAxisIndex: 1,
+                    borderColor: '#10b981',
+                    fillColor: '#d1fae5',
+                    opacity: 0.2,
+                    label: { 
+                        text: 'Normal Range (±2σ)', 
+                        style: { 
+                            color: '#059669', 
+                            background: '#d1fae5',
+                            fontSize: '11px',
+                            fontWeight: 'bold'
+                        },
+                        position: 'right',
+                        offsetX: -20,
+                        offsetY: -10
+                    }
+                }, {
                     y: 3,
-                    y2: -3,
                     yAxisIndex: 1,
                     borderColor: '#f59e0b',
-                    fillColor: '#fef3c7',
-                    opacity: 0,
-                    label: { text: 'Normal Range', style: { color: '#d97706' } }
+                    strokeDashArray: 3,
+                    label: { 
+                        text: 'Alert Threshold', 
+                        style: { 
+                            color: '#d97706',
+                            fontSize: '11px',
+                            fontWeight: '500',
+                            background: '#fef3c7',
+                            padding: '4px 8px',
+                            borderRadius: '4px'
+                        },
+                        position: 'right',
+                        offsetX: -15,
+                        offsetY: 10
+                    }
+                }, {
+                    y: -3,
+                    yAxisIndex: 1,
+                    borderColor: '#f59e0b',
+                    strokeDashArray: 3
                 }]
             }
         });
@@ -2332,9 +2385,8 @@ ORDER BY total_users DESC`,
         // Data Freshness Table
         this.renderFreshnessTable();
 
-        // E2E Latency Heatmap & Freshness Delta
+        // E2E Latency Heatmap
         this.renderE2ELatencyHeatmap();
-        this.renderFreshnessDeltaBar();
     }
 
     renderAdoptionCharts() {
@@ -2742,13 +2794,13 @@ ORDER BY total_users DESC`,
                         const d = heatmapData.tooltipData[seriesIndex]?.[dataPointIndex];
                         if (!d) return '';
                         return `\
-<div class="p-3">\
-  <div class="font-medium">${d.dataset}</div>\
-  <div class="text-sm text-gray-600 mt-1">\
-    Date: ${new Date(d.date).toLocaleDateString()}<br/>\
-    Hours Behind: ${d.hoursBehind}h<br/>\
-    Source TS: ${new Date(d.sourceTs).toLocaleString()}<br/>\
-    Bucket: ${d.bucket}\
+<div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); font-family: Inter, sans-serif;">\
+  <div style="font-weight: 600; color: #111827; font-size: 14px; margin-bottom: 8px;">${d.dataset}</div>\
+  <div style="font-size: 12px; color: #6b7280; line-height: 1.4;">\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Date:</span> ${new Date(d.date).toLocaleDateString()}</div>\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Hours Behind:</span> <span style="color: ${d.hoursBehind > 24 ? '#dc2626' : d.hoursBehind > 12 ? '#f59e0b' : '#059669'}; font-weight: 600;">${d.hoursBehind}h</span></div>\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Source TS:</span> ${new Date(d.sourceTs).toLocaleString()}</div>\
+    <div><span style="color: #374151; font-weight: 500;">Bucket:</span> <span style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${d.bucket}</span></div>\
   </div>\
 </div>`;
                     }
@@ -2762,38 +2814,7 @@ ORDER BY total_users DESC`,
         }
     }
 
-    renderFreshnessDeltaBar() {
-        const container = document.getElementById('freshnessDeltaBar');
-        if (!container) return;
-        try {
-            const joined = (this.data.recordFreshness || []).map(rf => {
-                const domo = (this.data.domoDataFreshness || []).find(d => d.DATASET === rf.DATASET) || { HOURS_SINCE_LAST_RUN: 0 };
-                return {
-                    DATASET: rf.DATASET,
-                    HOURS_BEHIND_NOW: rf.HOURS_BEHIND_NOW,
-                    HOURS_SINCE_LAST_RUN: domo.HOURS_SINCE_LAST_RUN,
-                    DELTA: rf.HOURS_BEHIND_NOW - domo.HOURS_SINCE_LAST_RUN
-                };
-            });
-            const top10 = joined.sort((a,b) => Math.abs(b.DELTA) - Math.abs(a.DELTA)).slice(0,10);
-            if (!top10.length) { container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No freshness deltas</div>'; return; }
-            const chart = new ApexCharts(container, {
-                series: [{ name: 'Delta (Hours)', data: top10.map(d => ({ x: d.DATASET, y: d.DELTA })) }],
-                chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
-                plotOptions: { bar: { horizontal: true, barHeight: '70%', distributed: true } },
-                colors: top10.map(d => d.DELTA > 0 ? '#f59e0b' : '#3b82f6'),
-                xaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } }, title: { text: 'Hours', style: { color: '#6b7280' } } },
-                yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
-                dataLabels: { enabled: false },
-                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
-            });
-            chart.render();
-            this.charts.freshnessDeltaBar = chart;
-        } catch (e) {
-            console.error('Error rendering freshness delta:', e);
-            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Delta unavailable</div>';
-        }
-    }
+
 
     // Query Optimization Methods
     filterQueries() {
