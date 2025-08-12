@@ -1910,6 +1910,9 @@ ORDER BY total_users DESC`,
     }
 
     renderCostCharts() {
+        // Credits and Cost Over Time (Full Width Dual-axis Line Chart)
+        this.renderCreditsAndCostChart();
+        
         // Daily Credits by Service Type (Full Width Stacked Area)
         const creditsByService = this.aggregateByServiceType();
         this.charts.creditsChart = new ApexCharts(document.querySelector("#creditsChart"), {
@@ -2109,6 +2112,130 @@ ORDER BY total_users DESC`,
         } catch (err) {
             console.error('Error rendering Cost per Row chart:', err);
             const el = document.querySelector('#costPerRowLine');
+            if (el) {
+                el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Error rendering chart</div>';
+            }
+        }
+    }
+
+    renderCreditsAndCostChart() {
+        try {
+            // Aggregate credits and cost by day from the existing cost data
+            const dailyData = {};
+            
+            // Process cost per credit data to get daily totals
+            (this.data.costPerCredit || []).forEach(item => {
+                const date = new Date(item.USAGE_DATE).toISOString().split('T')[0];
+                if (!dailyData[date]) {
+                    dailyData[date] = { credits: 0, cost: 0 };
+                }
+                dailyData[date].credits += (item.CREDITS_USED || 0);
+                dailyData[date].cost += (item.SPEND_USD || 0);
+            });
+
+            const sortedDates = Object.keys(dailyData).sort();
+            const creditsData = sortedDates.map(date => ({
+                x: date,
+                y: dailyData[date].credits
+            }));
+            const costData = sortedDates.map(date => ({
+                x: date,
+                y: dailyData[date].cost
+            }));
+
+            // Guard: if no data, show empty state
+            if (!sortedDates.length) {
+                const el = document.querySelector('#creditsAndCostChart');
+                if (el) {
+                    el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No credits/cost data for the selected period</div>';
+                }
+                return;
+            }
+
+            const chart = new ApexCharts(document.querySelector('#creditsAndCostChart'), {
+                series: [
+                    { name: 'Credits Used', data: creditsData, type: 'line' },
+                    { name: 'Cost (USD)', data: costData, type: 'line' }
+                ],
+                chart: { 
+                    type: 'line', 
+                    height: 320, 
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false }
+                },
+                stroke: { 
+                    curve: 'smooth', 
+                    width: [3, 3]
+                },
+                markers: { size: [4, 4] },
+                xaxis: { 
+                    type: 'datetime',
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' }
+                    }
+                },
+                yaxis: [
+                    {
+                        title: { 
+                            text: 'Credits Used',
+                            style: { color: '#A62A92' }
+                        },
+                        labels: { 
+                            style: { colors: '#6b7280', fontSize: '12px' },
+                            formatter: v => (v ?? 0).toLocaleString()
+                        }
+                    },
+                    {
+                        opposite: true,
+                        title: { 
+                            text: 'Cost (USD)',
+                            style: { color: '#99C8EC' }
+                        },
+                        labels: { 
+                            style: { colors: '#6b7280', fontSize: '12px' },
+                            formatter: v => '$' + (v ?? 0).toLocaleString()
+                        }
+                    }
+                ],
+                colors: ['#A62A92', '#99C8EC'],
+                fill: { 
+                    type: 'gradient',
+                    gradient: {
+                        shadeIntensity: 1,
+                        opacityFrom: 0.7,
+                        opacityTo: 0.9,
+                        stops: [0, 90, 100]
+                    }
+                },
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { 
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#374151' }
+                },
+                tooltip: {
+                    shared: true,
+                    intersect: false,
+                    x: {
+                        formatter: val => new Date(val).toLocaleDateString()
+                    },
+                    y: [
+                        {
+                            formatter: val => (val ?? 0).toLocaleString() + ' credits'
+                        },
+                        {
+                            formatter: val => '$' + (val ?? 0).toLocaleString()
+                        }
+                    ]
+                }
+            });
+            
+            chart.render();
+            this.charts.creditsAndCostChart = chart;
+        } catch (err) {
+            console.error('Error rendering Credits and Cost chart:', err);
+            const el = document.querySelector('#creditsAndCostChart');
             if (el) {
                 el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Error rendering chart</div>';
             }

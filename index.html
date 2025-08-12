@@ -252,12 +252,12 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                     <!-- Full Width Chart -->
                     <div class="chart-card">
                         <div class="flex items-center justify-between mb-6">
-                            <h3 class="text-lg font-semibold text-gray-900">Daily Credits by Service Type</h3>
+                            <h3 class="text-lg font-semibold text-gray-900">Credits and Cost Over Time</h3>
                             <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Last 30 days</span>
+                                <span class="text-sm text-gray-500">Daily trend analysis</span>
                             </div>
                         </div>
-                        <div id="creditsChart" class="h-80"></div>
+                        <div id="creditsAndCostChart" class="h-80"></div>
                     </div>
 
                     <!-- Two Column Layout for Supporting Charts -->
@@ -284,10 +284,13 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                             <div id="costPerRowLine" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <!-- Placeholder for future efficiency metric -->
-                            <div class="h-80 flex items-center justify-center text-gray-500">
-                                <p>Additional efficiency metrics coming soon</p>
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Daily Credits by Service Type</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Service breakdown</span>
+                                </div>
                             </div>
+                            <div id="creditsChart" class="h-80"></div>
                         </div>
                     </div>
 
