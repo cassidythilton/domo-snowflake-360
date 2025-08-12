@@ -3703,6 +3703,8 @@ ORDER BY total_users DESC`,
         const container = document.getElementById('queryComparisonList');
         container.innerHTML = ''; // Clear existing content
         
+        console.log('Rendering queries:', this.filteredQueries.length);
+        
         // Show all filtered queries (no pagination)
         this.filteredQueries.forEach(query => {
             const queryElement = this.createQueryComparisonElement(query);
