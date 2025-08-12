@@ -9,7 +9,7 @@ class SnowDomoDashboard {
         this.data = {};
         this.alerts = [];
         this.createdAlerts = [];
-        this.newAlertEvents = [];
+        // newAlertEvents removed - new alerts now appear directly in Live Alerts
         this.querySwarmChart = null;
         this.monacoEditor = null;
         this.queryRewriteResults = [];
@@ -143,19 +143,7 @@ class SnowDomoDashboard {
         setTimeout(() => {
             newAlert.status = 'active';
             this.renderAlerts();
-            // Evaluate mock firing: basic keyword simulation or simple boolean
-            try {
-                const fired = /error|fail|duplicate|orphan|anomal/i.test(newAlert.sql);
-                if (fired) {
-                    this.newAlertEvents.unshift({ 
-                        id: newAlert.id,
-                        ts: Date.now(), 
-                        name: newAlert.name, 
-                        count: Math.floor(Math.random()*5)+1 
-                    });
-                    this.renderAlerts();
-                }
-            } catch (_) {}
+            // Mock firing logic removed - new alerts now appear directly in Live Alerts with NEW styling
         }, 2000 + Math.random()*1000);
     }
 
@@ -4345,7 +4333,15 @@ ORDER BY total_users DESC`,
                 isUserCreated: true
             }));
 
-            const allLiveAlerts = [...preexistingAlerts, ...createdLiveAlerts].slice(0, 14);
+            // Sort created alerts to show new ones first
+            const sortedCreatedAlerts = createdLiveAlerts.sort((a, b) => {
+                // New alerts (implementing) first, then by timestamp (newest first)
+                if (a.isNew && !b.isNew) return -1;
+                if (!a.isNew && b.isNew) return 1;
+                return b.timestamp - a.timestamp;
+            });
+            
+            const allLiveAlerts = [...sortedCreatedAlerts, ...preexistingAlerts].slice(0, 14);
             
             allLiveAlerts.forEach(alert => {
                 const el = document.createElement('div');
@@ -4409,27 +4405,7 @@ ORDER BY total_users DESC`,
             }
         }
 
-        // New Alerts activity
-        const activity = document.getElementById('newAlertsList');
-        const badge = document.getElementById('newAlertsBadge');
-        if (activity && badge) {
-            activity.innerHTML = '';
-            this.newAlertEvents.forEach(evt => {
-                const item = document.createElement('div');
-                item.className = 'p-2 border border-gray-200 rounded-lg bg-white';
-                item.innerHTML = `
-                    <div class="flex items-center justify-between">
-                        <div class="text-[11px] text-gray-500">${new Date(evt.ts).toLocaleString()}</div>
-                        <button class="text-[11px] text-brand-700 hover:underline" data-view-results="${evt.id || ''}">View results</button>
-                    </div>
-                    <div class="text-xs text-gray-800"><span class="font-semibold">${evt.name}</span> fired • ${evt.count} matches</div>`;
-                activity.appendChild(item);
-            });
-            badge.textContent = String(this.newAlertEvents.length);
-            activity.querySelectorAll('[data-view-results]').forEach(btn => {
-                btn.addEventListener('click', () => this.openResultsModal());
-            });
-        }
+        // New Alerts activity section removed - new alerts now appear at top of Live Alerts
     }
 
     // Simple modal to show mock results and allow Deploy
