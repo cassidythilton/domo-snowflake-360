@@ -1073,22 +1073,6 @@ FROM QUERY_REWRITE_RESULTS</pre>
                     </button>
                 </div>
             </div>
-            <!-- Recommendations (collapsible) -->
-            <div class="mb-4">
-                <div class="flex items-center justify-between mb-2">
-                    <h3 class="text-sm font-semibold text-gray-800">Recommendations</h3>
-                    <button id="recsToggle" class="text-xs text-brand-700 hover:underline">Hide</button>
-                </div>
-                <div id="recsSection">
-                    <div id="alertsList" class="space-y-4">
-                        <!-- Alerts will be populated by JavaScript -->
-                    </div>
-                    <button id="showMoreAlerts" class="w-full mt-4 px-4 py-2 text-sm text-brand-600 hover:text-brand-800 font-medium border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
-                        Show more alerts
-                    </button>
-                </div>
-            </div>
-
             <!-- New Alerts Activity -->
             <div class="mb-6">
                 <div class="flex items-center justify-between mb-2">
@@ -1099,7 +1083,7 @@ FROM QUERY_REWRITE_RESULTS</pre>
             </div>
 
             <!-- Created Alerts (compact table) -->
-            <div class="mb-2">
+            <div class="mb-6">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-sm font-semibold text-gray-800">Created Alerts</h3>
                 </div>
@@ -1116,6 +1100,32 @@ FROM QUERY_REWRITE_RESULTS</pre>
                         <tbody id="createdAlertsList" class="align-top"></tbody>
                     </table>
                     <div id="createdAlertsEmpty" class="p-3 text-[11px] text-gray-500 hidden">No alerts yet. Create one to get started.</div>
+                </div>
+            </div>
+
+            <!-- Recommendations (collapsible) -->
+            <div class="mb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-semibold text-gray-800">Recommendations</h3>
+                    <button id="recsToggle" class="text-xs text-brand-700 hover:underline">Hide</button>
+                </div>
+                <div id="recsSection">
+                    <div id="alertsList" class="space-y-4">
+                        <!-- Alerts will be populated by JavaScript -->
+                    </div>
+                    <button id="showMoreAlerts" class="w-full mt-4 px-4 py-2 text-sm text-brand-600 hover:text-brand-800 font-medium border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
+                        Show more alerts
+                    </button>
+                </div>
+            </div>
+
+            <!-- Live Alerts (existing alerts) -->
+            <div class="mb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-semibold text-gray-800">Live Alerts</h3>
+                </div>
+                <div id="liveAlertsList" class="space-y-2">
+                    <!-- Live alerts will be populated by JavaScript -->
                 </div>
             </div>
         </aside>

@@ -4238,22 +4238,58 @@ ORDER BY total_users DESC`,
     }
 
     renderAlerts() {
-        // Recommendations list (existing)
+        // Recommendations list - "not in production" styling
         const alertsList = document.getElementById('alertsList');
         if (alertsList) {
-        alertsList.innerHTML = '';
-        const visibleAlerts = this.alerts.slice(0, 5);
-        visibleAlerts.forEach(alert => {
+            alertsList.innerHTML = '';
+            const visibleAlerts = this.alerts.slice(0, 5);
+            visibleAlerts.forEach(alert => {
                 const el = document.createElement('div');
-                el.className = `alert-item alert-${alert.type} p-3 bg-white border border-gray-200 rounded-lg fade-in`;
+                el.className = `alert-recommendation alert-${alert.type} fade-in`;
                 el.innerHTML = `
-                    <div class="text-sm font-medium text-gray-900">${alert.title}</div>
-                    <div class="text-xs text-gray-600">${alert.description}</div>
-                    <div class="text-[11px] text-gray-400">${alert.timestamp.toLocaleString()}</div>`;
+                    <div class="text-sm font-medium text-gray-700" style="font-family: 'Inter', sans-serif;">${alert.title}</div>
+                    <div class="text-xs text-gray-500 mt-1" style="font-style: italic;">${alert.description}</div>
+                    <div class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                        DRAFT • ${alert.timestamp.toLocaleString()}
+                    </div>`;
                 alertsList.appendChild(el);
             });
-        const showMoreButton = document.getElementById('showMoreAlerts');
+            const showMoreButton = document.getElementById('showMoreAlerts');
             if (showMoreButton) showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
+        }
+
+        // Live Alerts (existing alerts that were previously at the bottom)
+        const liveAlertsList = document.getElementById('liveAlertsList');
+        if (liveAlertsList) {
+            liveAlertsList.innerHTML = '';
+            // Show only the alerts that have been deployed/activated
+            const liveAlerts = this.createdAlerts.filter(alert => alert.status === 'active').slice(0, 3);
+            liveAlerts.forEach(alert => {
+                const el = document.createElement('div');
+                el.className = `alert-live alert-${alert.level} fade-in`;
+                el.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="text-sm font-semibold text-gray-900">${alert.name}</div>
+                            <div class="text-xs text-gray-600 mt-1">${alert.description || 'Active monitoring alert'}</div>
+                            <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                                <span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
+                                LIVE • Created ${new Date(alert.createdAt).toLocaleDateString()}
+                            </div>
+                        </div>
+                        <div class="text-xs font-medium text-gray-500 uppercase">${alert.level}</div>
+                    </div>`;
+                liveAlertsList.appendChild(el);
+            });
+            
+            // Show message if no live alerts
+            if (liveAlerts.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.className = 'text-xs text-gray-500 italic p-2 text-center';
+                emptyEl.textContent = 'No live alerts deployed yet';
+                liveAlertsList.appendChild(emptyEl);
+            }
         }
 
         // Created Alerts table with zebra striping
@@ -4383,11 +4419,14 @@ ORDER BY total_users DESC`,
         
         hiddenAlerts.forEach(alert => {
             const alertElement = document.createElement('div');
-            alertElement.className = `alert-item alert-${alert.type} p-3 bg-white border border-gray-200 rounded-lg fade-in`;
+            alertElement.className = `alert-recommendation alert-${alert.type} fade-in`;
             alertElement.innerHTML = `
-                <div class="text-sm font-medium text-gray-900">${alert.title}</div>
-                <div class="text-xs text-gray-600">${alert.description}</div>
-                <div class="text-[11px] text-gray-400">${alert.timestamp.toLocaleString()}</div>
+                <div class="text-sm font-medium text-gray-700" style="font-family: 'Inter', sans-serif;">${alert.title}</div>
+                <div class="text-xs text-gray-500 mt-1" style="font-style: italic;">${alert.description}</div>
+                <div class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                    <span class="inline-block w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                    DRAFT • ${alert.timestamp.toLocaleString()}
+                </div>
             `;
             alertsList.appendChild(alertElement);
         });
