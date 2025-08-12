@@ -170,7 +170,8 @@ class SnowDomoDashboard {
         const aiMode = document.getElementById('aiMode');
         
         if (manualBtn && aiBtn && manualMode && aiMode) {
-            manualBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm bg-white text-[#24BFF2] shadow-sm';
+            manualBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm';
+            manualBtn.style.color = '#24BFF2';
             aiBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
             
             manualMode.classList.remove('hidden');
@@ -189,7 +190,8 @@ class SnowDomoDashboard {
         
         if (manualBtn && aiBtn && manualMode && aiMode) {
             manualBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
-            aiBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm bg-gradient-to-r from-[#A62A92] to-[#24BFF2] text-white shadow-sm';
+            aiBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm text-white shadow-sm';
+            aiBtn.style.background = 'linear-gradient(135deg, #A62A92 0%, #A07AC0 50%, #99CCEE 100%)';
             
             manualMode.classList.add('hidden');
             aiMode.classList.remove('hidden');
@@ -1269,10 +1271,10 @@ ORDER BY total_users DESC`,
                 'editor.background': '#1f2937',
                 'editor.foreground': '#f9fafb',
                 'editor.lineHighlightBackground': '#374151',
-                'editor.selectionBackground': '#24BFF2',
-                'editorCursor.foreground': '#24BFF2',
+                'editor.selectionBackground': '#4f46e5',
+                'editorCursor.foreground': '#a855f7',
                 'editorLineNumber.foreground': '#6b7280',
-                'editorLineNumber.activeForeground': '#24BFF2'
+                'editorLineNumber.activeForeground': '#a855f7'
             }
         });
         
