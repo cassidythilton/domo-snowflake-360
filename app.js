@@ -50,13 +50,7 @@ class SnowDomoDashboard {
         if (!modal) return;
         modal.classList.remove('hidden');
         // Populate datasets (Mock from seed; Live from placeholder later)
-        const dsSelect = document.getElementById('alertDatasets');
-        dsSelect.innerHTML = '';
-        const list = this.isLiveMode ? (this.liveDatasets || []) : (this.mockDatasets || []);
-        list.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name; opt.textContent = name; dsSelect.appendChild(opt);
-        });
+        this.populateModernDatasetSelector();
         // Initialize SQL editor (Monaco or textarea) with dark theme
         const editorContainer = document.getElementById('sqlEditor');
         editorContainer.innerHTML = '';
@@ -145,6 +139,78 @@ class SnowDomoDashboard {
             this.renderAlerts();
             // Mock firing logic removed - new alerts now appear directly in Live Alerts with NEW styling
         }, 2000 + Math.random()*1000);
+    }
+
+    // Populate the modern dataset selector
+    populateModernDatasetSelector() {
+        const datasetList = document.getElementById('datasetList');
+        const dsSelect = document.getElementById('alertDatasets'); // Hidden select for compatibility
+        const searchInput = document.getElementById('datasetSearch');
+        
+        if (!datasetList || !dsSelect || !searchInput) return;
+        
+        const list = this.isLiveMode ? (this.liveDatasets || []) : (this.mockDatasets || []);
+        const selectedDatasets = new Set();
+        
+        // Clear existing content
+        datasetList.innerHTML = '';
+        dsSelect.innerHTML = '';
+        
+        // Create dataset options
+        const allOptions = list.map(name => {
+            const option = document.createElement('div');
+            option.className = 'dataset-option';
+            option.dataset.value = name;
+            option.innerHTML = `
+                <div class="dataset-name">${name}</div>
+                <div class="dataset-type">Dataset</div>
+            `;
+            
+            // Add click handler
+            option.addEventListener('click', () => {
+                if (selectedDatasets.has(name)) {
+                    selectedDatasets.delete(name);
+                    option.classList.remove('selected');
+                } else {
+                    selectedDatasets.add(name);
+                    option.classList.add('selected');
+                }
+                this.updateHiddenSelect(selectedDatasets);
+                this.validateCreateAlertForm();
+            });
+            
+            return { element: option, name: name.toLowerCase() };
+        });
+        
+        // Initial render
+        allOptions.forEach(opt => datasetList.appendChild(opt.element));
+        
+        // Add search functionality
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            datasetList.innerHTML = '';
+            
+            allOptions
+                .filter(opt => opt.name.includes(searchTerm))
+                .forEach(opt => datasetList.appendChild(opt.element));
+        });
+        
+        // Setup hidden select for compatibility
+        this.updateHiddenSelect(selectedDatasets);
+    }
+    
+    // Update the hidden select element to maintain compatibility
+    updateHiddenSelect(selectedDatasets) {
+        const dsSelect = document.getElementById('alertDatasets');
+        dsSelect.innerHTML = '';
+        
+        Array.from(selectedDatasets).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            opt.selected = true;
+            dsSelect.appendChild(opt);
+        });
     }
 
     // Handle SQL mode switching
@@ -453,10 +519,12 @@ class SnowDomoDashboard {
         document.getElementById('cancelCreateAlert').addEventListener('click', () => this.handleCancelCreateAlert());
         document.getElementById('saveCreateAlert').addEventListener('click', () => this.handleSaveCreateAlert());
 
-        ['alertName','alertDatasets','alertLevel'].forEach(id => {
+        ['alertName','alertLevel'].forEach(id => {
             document.getElementById(id).addEventListener('input', () => this.validateCreateAlertForm());
             document.getElementById(id).addEventListener('change', () => this.validateCreateAlertForm());
         });
+        
+        // Dataset selection is now handled in populateModernDatasetSelector()
 
         // SQL mode toggle events
         const manualModeBtn = document.getElementById('manualModeBtn');
