@@ -4329,7 +4329,7 @@ ORDER BY total_users DESC`,
                 description: alert.description || 'User-created monitoring alert',
                 type: alert.level,
                 timestamp: new Date(alert.createdAt),
-                isNew: alert.status === 'implementing', // Mark implementing alerts as new
+                isNew: true, // Keep NEW styling for all user-created alerts
                 isUserCreated: true
             }));
 
@@ -4349,11 +4349,11 @@ ORDER BY total_users DESC`,
                 let statusIndicator = '';
                 let statusText = 'LIVE';
                 
-                // Special styling for new alerts
+                // Special styling for user-created alerts (always keep NEW styling)
                 if (alert.isNew) {
                     statusClass += ' alert-new';
                     statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>';
-                    statusText = 'NEW';
+                    statusText = 'LIVE'; // Show LIVE status but keep NEW styling
                 } else {
                     statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>';
                 }
