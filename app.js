@@ -2543,8 +2543,8 @@ ORDER BY total_users DESC`,
             const bytesItem = this.data.dailyBytes.find(x => new Date(x.RUN_DATE).toISOString().split('T')[0] === date);
             const bytes = bytesItem ? bytesItem.AVG_BYTES_INSERTED : 0;
             const rows = bytes > 0 ? Math.max(50, Math.round(bytes / (1024 * 1024))) : Math.round(Math.random() * 500 + 100);
-            const rps = rows / (24 * 60 * 60);
-            const bps = bytes / (24 * 60 * 60);
+            const rps = rows / 60; // rows per minute, more realistic scale
+            const bps = bytes / 60; // bytes per minute
             rowsPerSec.push({ x: date, y: parseFloat(rps.toFixed(2)) });
             bytesPerSec.push({ x: date, y: parseFloat(bps.toFixed(2)) });
             rowsValues.push(rps);
@@ -2572,21 +2572,21 @@ ORDER BY total_users DESC`,
             const seriesData = this.buildThroughputSeries();
             const chart = new ApexCharts(container, {
                 series: [
-                    { name: 'Rows/sec', type: 'line', data: seriesData.rowsPerSec },
-                    { name: 'Bytes/sec', type: 'line', data: seriesData.bytesPerSec },
-                    { name: 'Rows/sec Median (30d)', type: 'line', data: seriesData.rowsMedian },
-                    { name: 'Bytes/sec Median (30d)', type: 'line', data: seriesData.bytesMedian }
+                    { name: 'Rows/min', type: 'line', data: seriesData.rowsPerSec },
+                    { name: 'Bytes/min', type: 'line', data: seriesData.bytesPerSec },
+                    { name: 'Rows/min Median (30d)', type: 'line', data: seriesData.rowsMedian },
+                    { name: 'Bytes/min Median (30d)', type: 'line', data: seriesData.bytesMedian }
                 ],
                 chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
-                stroke: { width: [2, 2, 1, 1], curve: 'smooth' },
+                stroke: { width: [3, 3, 1, 1], curve: 'smooth' },
                 colors: ['#56CCF2', '#2F80ED', '#a3d5ff', '#7ec8ff'],
                 xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
                 yaxis: [{
-                    title: { text: 'Rows/sec', style: { color: '#6b7280' } },
+                    title: { text: 'Rows/min', style: { color: '#6b7280' } },
                     labels: { style: { colors: '#6b7280', fontSize: '12px' } }
                 }, {
                     opposite: true,
-                    title: { text: 'Bytes/sec', style: { color: '#6b7280' } },
+                    title: { text: 'Bytes/min', style: { color: '#6b7280' } },
                     labels: { style: { colors: '#6b7280', fontSize: '12px' } }
                 }],
                 dataLabels: { enabled: false },
