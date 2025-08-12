@@ -567,11 +567,14 @@ class SnowDomoDashboard {
         this.data.costPerCredit = [];
         dates.forEach(date => {
             ['WAREHOUSE_METERING', 'AI_SERVICES', 'SNOWPARK_CONTAINER_SERVICES'].forEach(serviceType => {
+                const credits = Math.random() * 50 + 10;
+                const cost = credits * 2 * (0.8 + Math.random() * 0.4); // Cost ~2x credits with some variance
                 this.data.costPerCredit.push({
                     USAGE_DATE: date,
                     SERVICE_TYPE: serviceType,
-                    CREDITS: Math.random() * 50 + 10,
-                    SPEND_USD: Math.random() * 50 + 10
+                    CREDITS: credits,
+                    CREDITS_USED: credits, // Add the field the chart is looking for
+                    SPEND_USD: cost
                 });
             });
         });
@@ -2167,7 +2170,7 @@ ORDER BY total_users DESC`,
                     curve: 'smooth', 
                     width: [3, 3]
                 },
-                markers: { size: [4, 4] },
+                markers: { size: 0 },
                 xaxis: { 
                     type: 'datetime',
                     labels: { 
@@ -2199,13 +2202,7 @@ ORDER BY total_users DESC`,
                 ],
                 colors: ['#A62A92', '#99C8EC'],
                 fill: { 
-                    type: 'gradient',
-                    gradient: {
-                        shadeIntensity: 1,
-                        opacityFrom: 0.7,
-                        opacityTo: 0.9,
-                        stops: [0, 90, 100]
-                    }
+                    opacity: 1
                 },
                 dataLabels: { enabled: false },
                 grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
