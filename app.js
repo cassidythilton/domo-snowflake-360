@@ -4242,7 +4242,7 @@ ORDER BY total_users DESC`,
         const alertsList = document.getElementById('alertsList');
         if (alertsList) {
             alertsList.innerHTML = '';
-            const visibleAlerts = this.alerts.slice(0, 5);
+            const visibleAlerts = this.alerts.slice(0, 4);
             visibleAlerts.forEach(alert => {
                 const el = document.createElement('div');
                 el.className = `alert-recommendation alert-${alert.type} fade-in`;
@@ -4256,7 +4256,7 @@ ORDER BY total_users DESC`,
                 alertsList.appendChild(el);
             });
             const showMoreButton = document.getElementById('showMoreAlerts');
-            if (showMoreButton) showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
+            if (showMoreButton) showMoreButton.style.display = this.alerts.length > 4 ? 'block' : 'none';
         }
 
         // Live Alerts (preexisting alerts from the original system)
@@ -4264,7 +4264,7 @@ ORDER BY total_users DESC`,
         if (liveAlertsList) {
             liveAlertsList.innerHTML = '';
             
-            // Create some preexisting live alerts that were already in the system
+            // Create diverse preexisting live alerts that were already in the system
             const preexistingAlerts = [
                 {
                     title: 'High Query Failure Rate',
@@ -4283,6 +4283,72 @@ ORDER BY total_users DESC`,
                     description: 'Retail Accounts hasn\'t been updated for 24+ hours',
                     type: 'warning',
                     timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 1 week ago
+                },
+                {
+                    title: 'Data Freshness Alert',
+                    description: 'Customer data is 6+ hours stale',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+                },
+                {
+                    title: 'Warehouse Credit Limit',
+                    description: 'LARGE_WH approaching daily credit limit',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) // 1 day ago
+                },
+                {
+                    title: 'Schema Drift Detected',
+                    description: 'Product catalog table schema changed unexpectedly',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000) // 4 days ago
+                },
+                {
+                    title: 'High Null Rate',
+                    description: 'Customer email field showing 15% null values',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000) // 6 days ago
+                },
+                {
+                    title: 'API Rate Limit Exceeded',
+                    description: 'External API connector hitting rate limits',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) // 8 days ago
+                },
+                {
+                    title: 'Duplicate Key Violations',
+                    description: 'Primary key duplicates found in order_items',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // 10 days ago
+                },
+                {
+                    title: 'Slow Query Performance',
+                    description: 'Customer analytics queries taking >30s',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000) // 12 days ago
+                },
+                {
+                    title: 'Data Volume Spike',
+                    description: 'Daily ingestion 300% above baseline',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) // 14 days ago
+                },
+                {
+                    title: 'Connection Timeout',
+                    description: 'Database connector experiencing intermittent timeouts',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000) // 9 days ago
+                },
+                {
+                    title: 'Orphaned Records',
+                    description: 'Found 1.2K orphaned records in sales_detail',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000) // 11 days ago
+                },
+                {
+                    title: 'Late Data Arrival',
+                    description: 'Financial reports arriving 2+ hours after SLA',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000) // 13 days ago
                 }
             ];
 
@@ -4294,7 +4360,7 @@ ORDER BY total_users DESC`,
                 timestamp: new Date(alert.createdAt)
             }));
 
-            const allLiveAlerts = [...preexistingAlerts, ...deployedAlerts].slice(0, 5);
+            const allLiveAlerts = [...preexistingAlerts, ...deployedAlerts].slice(0, 14);
             
             allLiveAlerts.forEach(alert => {
                 const el = document.createElement('div');
