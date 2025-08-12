@@ -808,7 +808,7 @@ body {
 }
 
 .dataset-list-container {
-    max-height: 200px;
+    max-height: 160px;
     overflow-y: auto;
     background: white;
 }
