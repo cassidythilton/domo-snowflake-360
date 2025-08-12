@@ -57,11 +57,15 @@ class SnowDomoDashboard {
             const opt = document.createElement('option');
             opt.value = name; opt.textContent = name; dsSelect.appendChild(opt);
         });
-        // Initialize SQL editor (Monaco or textarea)
+        // Initialize SQL editor (Monaco or textarea) with dark theme
         const editorContainer = document.getElementById('sqlEditor');
         editorContainer.innerHTML = '';
         this.createAlertEditor = this.createMonacoEditor(editorContainer, '-- Write a SQL query that returns rows when the alert should fire', false);
-        // No inline prompt area anymore - using modal
+        
+        // Initialize toggle mode (default to Manual)
+        this.currentSqlMode = 'manual';
+        this.switchToManualMode();
+        
         this.validateCreateAlertForm();
         // Focus trap: focus first input
         setTimeout(() => document.getElementById('alertName')?.focus(), 0);
@@ -155,48 +159,65 @@ class SnowDomoDashboard {
         }, 2000 + Math.random()*1000);
     }
 
-    // Open custom Cortex modal
-    openCortexModal() {
-        const modal = document.getElementById('cortexModal');
-        if (!modal) return;
+    // Handle SQL mode switching
+    switchToManualMode() {
+        this.currentSqlMode = 'manual';
         
-        modal.classList.remove('hidden');
+        // Update button styles
+        const manualBtn = document.getElementById('manualModeBtn');
+        const aiBtn = document.getElementById('aiModeBtn');
+        const manualMode = document.getElementById('manualMode');
+        const aiMode = document.getElementById('aiMode');
         
-        // Set up event handlers if not already done
-        if (!modal.hasAttribute('data-handlers-set')) {
-            modal.querySelector('#closeCortexModal').addEventListener('click', () => this.closeCortexModal());
-            modal.querySelector('#cortexCancelBtn').addEventListener('click', () => this.closeCortexModal());
-            modal.querySelector('#cortexGenerateBtn').addEventListener('click', () => this.handleCortexGenerate());
-            modal.setAttribute('data-handlers-set', 'true');
+        if (manualBtn && aiBtn && manualMode && aiMode) {
+            manualBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm bg-white text-purple-600 shadow-sm';
+            aiBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
+            
+            manualMode.classList.remove('hidden');
+            aiMode.classList.add('hidden');
+        }
+    }
+    
+    switchToAIMode() {
+        this.currentSqlMode = 'ai';
+        
+        // Update button styles
+        const manualBtn = document.getElementById('manualModeBtn');
+        const aiBtn = document.getElementById('aiModeBtn');
+        const manualMode = document.getElementById('manualMode');
+        const aiMode = document.getElementById('aiMode');
+        
+        if (manualBtn && aiBtn && manualMode && aiMode) {
+            manualBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
+            aiBtn.className = 'flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg transition-all font-medium text-sm bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-sm';
+            
+            manualMode.classList.add('hidden');
+            aiMode.classList.remove('hidden');
         }
         
-        // Clear previous input and messages
-        document.getElementById('cortexPromptTextarea').value = '';
-        document.getElementById('cortexStatusMessage').classList.add('hidden');
-        document.getElementById('cortexErrorMessage').classList.add('hidden');
-        
-        // Focus the textarea
-        setTimeout(() => document.getElementById('cortexPromptTextarea').focus(), 100);
+        // Focus the AI prompt
+        setTimeout(() => document.getElementById('aiPrompt')?.focus(), 100);
     }
-
-    closeCortexModal() {
-        const modal = document.getElementById('cortexModal');
-        if (modal) modal.classList.add('hidden');
-    }
-
-    async handleCortexGenerate() {
-        const prompt = document.getElementById('cortexPromptTextarea').value.trim();
+    
+    async handleAIGenerate() {
+        const prompt = document.getElementById('aiPrompt').value.trim();
         if (!prompt) return;
         
-        const statusEl = document.getElementById('cortexStatusMessage');
-        const errorEl = document.getElementById('cortexErrorMessage');
-        const generateBtn = document.getElementById('cortexGenerateBtn');
+        const statusEl = document.getElementById('aiStatus');
+        const errorEl = document.getElementById('aiError');
+        const generateBtn = document.getElementById('generateSqlBtn');
         
         // Show loading state
         statusEl.classList.remove('hidden');
         errorEl.classList.add('hidden');
         generateBtn.disabled = true;
-        generateBtn.textContent = 'Generating...';
+        generateBtn.innerHTML = `
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Generating...
+        `;
         
         try {
             const sql = await this.generateSQLWithCortex(prompt);
@@ -204,13 +225,22 @@ class SnowDomoDashboard {
                 this.createAlertEditor.setValue(sql);
                 this.validateCreateAlertForm();
             }
-            this.closeCortexModal();
+            // Auto-switch to manual mode after generation
+            this.switchToManualMode();
         } catch (error) {
             errorEl.classList.remove('hidden');
             statusEl.classList.add('hidden');
         } finally {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate SQL';
+            generateBtn.innerHTML = `
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    <circle cx="12" cy="12" r="1"/>
+                    <path d="m19 19-2-2m-5 5-2-2"/>
+                </svg>
+                Generate SQL
+            `;
+            statusEl.classList.add('hidden');
         }
     }
 
@@ -439,10 +469,15 @@ class SnowDomoDashboard {
             document.getElementById(id).addEventListener('change', () => this.validateCreateAlertForm());
         });
 
-        // Cortex modal events
-        const cortexBtn = document.getElementById('cortexBtn');
-        if (cortexBtn) {
-            cortexBtn.addEventListener('click', () => this.openCortexModal());
+        // SQL mode toggle events
+        const manualModeBtn = document.getElementById('manualModeBtn');
+        const aiModeBtn = document.getElementById('aiModeBtn');
+        const generateSqlBtn = document.getElementById('generateSqlBtn');
+        
+        if (manualModeBtn && aiModeBtn && generateSqlBtn) {
+            manualModeBtn.addEventListener('click', () => this.switchToManualMode());
+            aiModeBtn.addEventListener('click', () => this.switchToAIMode());
+            generateSqlBtn.addEventListener('click', () => this.handleAIGenerate());
         }
     }
 
@@ -1231,13 +1266,13 @@ ORDER BY total_users DESC`,
                 { token: 'delimiter', foreground: '9841b6' }
             ],
             colors: {
-                'editor.background': '#22262e',
-                'editor.foreground': '#ffffff',
-                'editor.lineHighlightBackground': '#d8c46205',
-                'editor.selectionBackground': '#9841b620',
-                'editorCursor.foreground': '#d8c462',
+                'editor.background': '#1f2937',
+                'editor.foreground': '#f9fafb',
+                'editor.lineHighlightBackground': '#374151',
+                'editor.selectionBackground': '#4f46e5',
+                'editorCursor.foreground': '#a855f7',
                 'editorLineNumber.foreground': '#6b7280',
-                'editorLineNumber.activeForeground': '#d8c462'
+                'editorLineNumber.activeForeground': '#a855f7'
             }
         });
         
