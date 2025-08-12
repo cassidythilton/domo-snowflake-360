@@ -2891,6 +2891,12 @@ ORDER BY total_users DESC`,
 
             if (!gridRect.width || !gridRect.height) return;
 
+            // Coordinates relative to the group we are inserting into.
+            // If we draw inside the grid group, do NOT add the inner translate offsets.
+            const isGrid = !!gridGroup;
+            const baseX = isGrid ? 0 : gridRect.x;
+            const baseY = isGrid ? 0 : gridRect.y;
+
             // Use ApexCharts' computed axis extents to ensure perfect alignment
             const xMin = w.globals.minX;
             const xMax = w.globals.maxX;
@@ -2905,14 +2911,14 @@ ORDER BY total_users DESC`,
             const yMedRel = (y_med - yMin) / (yMax - yMin);
 
             // Convert to pixel coordinates (SVG y-axis is inverted)
-            const xMedPx = gridRect.x + (xMedRel * gridRect.width);
-            const yMedPx = gridRect.y + ((1 - yMedRel) * gridRect.height);
+            const xMedPx = baseX + (xMedRel * gridRect.width);
+            const yMedPx = baseY + ((1 - yMedRel) * gridRect.height);
 
             // Define quadrant boundaries using proper grid coordinates
-            const gridLeft = gridRect.x;
-            const gridRight = gridRect.x + gridRect.width;
-            const gridTop = gridRect.y;
-            const gridBottom = gridRect.y + gridRect.height;
+            const gridLeft = baseX;
+            const gridRight = baseX + gridRect.width;
+            const gridTop = baseY;
+            const gridBottom = baseY + gridRect.height;
 
             const quadrants = [
                 // Bottom-left: Monitor (Purple) - Low util, Low cost
