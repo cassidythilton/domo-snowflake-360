@@ -454,9 +454,7 @@ class SnowDomoDashboard {
             this.filterQueries();
         });
 
-        document.getElementById('loadMoreQueries').addEventListener('click', () => {
-            this.loadMoreQueries();
-        });
+        // Load More Queries functionality removed - show all by default
 
         // Remove old cortex button handler - now handled by openCortexModal
         // Create Alert modal events
@@ -3692,39 +3690,24 @@ ORDER BY total_users DESC`,
         }
 
         this.filteredQueries = filtered;
-        this.currentQueryPage = 1;
         this.updateResultsInfo();
         this.renderQueryComparisons();
     }
 
     updateResultsInfo() {
         const resultsCount = document.getElementById('resultsCount');
-        const displayedCount = Math.min(this.currentQueryPage * this.queriesPerPage, this.filteredQueries.length);
-        resultsCount.textContent = `Showing ${displayedCount} of ${this.filteredQueries.length} query optimizations`;
+        resultsCount.textContent = `Showing ${this.filteredQueries.length} of ${this.filteredQueries.length} query optimizations`;
     }
 
     renderQueryComparisons() {
         const container = document.getElementById('queryComparisonList');
-        const startIndex = (this.currentQueryPage - 1) * this.queriesPerPage;
-        const endIndex = startIndex + this.queriesPerPage;
-        const queriesToShow = this.filteredQueries.slice(startIndex, endIndex);
-
-        if (this.currentQueryPage === 1) {
-            container.innerHTML = '';
-        }
-
-        queriesToShow.forEach(query => {
+        container.innerHTML = ''; // Clear existing content
+        
+        // Show all filtered queries (no pagination)
+        this.filteredQueries.forEach(query => {
             const queryElement = this.createQueryComparisonElement(query);
             container.appendChild(queryElement);
         });
-
-        // Update load more button
-        const loadMoreBtn = document.getElementById('loadMoreQueries');
-        if (endIndex >= this.filteredQueries.length) {
-            loadMoreBtn.style.display = 'none';
-        } else {
-            loadMoreBtn.style.display = 'block';
-        }
     }
 
     createQueryComparisonElement(query) {
@@ -4089,11 +4072,7 @@ ORDER BY total_users DESC`,
         }
     }
 
-    loadMoreQueries() {
-        this.currentQueryPage++;
-        this.renderQueryComparisons();
-        this.updateResultsInfo();
-    }
+    // loadMoreQueries method removed - show all queries by default
 
     generateAlerts() {
         this.alerts = [];
@@ -4244,7 +4223,7 @@ ORDER BY total_users DESC`,
         // Recommendations list - "not in production" styling
         const alertsList = document.getElementById('alertsList');
         if (alertsList) {
-            alertsList.innerHTML = '';
+        alertsList.innerHTML = '';
             const visibleAlerts = this.alerts.slice(0, 4);
             visibleAlerts.forEach(alert => {
                 const el = document.createElement('div');
