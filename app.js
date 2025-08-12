@@ -4259,35 +4259,66 @@ ORDER BY total_users DESC`,
             if (showMoreButton) showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
         }
 
-        // Live Alerts (existing alerts that were previously at the bottom)
+        // Live Alerts (preexisting alerts from the original system)
         const liveAlertsList = document.getElementById('liveAlertsList');
         if (liveAlertsList) {
             liveAlertsList.innerHTML = '';
-            // Show only the alerts that have been deployed/activated
-            const liveAlerts = this.createdAlerts.filter(alert => alert.status === 'active').slice(0, 3);
-            liveAlerts.forEach(alert => {
+            
+            // Create some preexisting live alerts that were already in the system
+            const preexistingAlerts = [
+                {
+                    title: 'High Query Failure Rate',
+                    description: 'Query failure rate exceeds 5% threshold',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+                },
+                {
+                    title: 'Cost Surge Detection',
+                    description: 'Daily spend exceeded normal variance by 3σ',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) // 5 days ago
+                },
+                {
+                    title: 'Connector SLA Breach',
+                    description: 'Retail Accounts hasn\'t been updated for 24+ hours',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 1 week ago
+                }
+            ];
+
+            // Add any deployed created alerts to the live alerts
+            const deployedAlerts = this.createdAlerts.filter(alert => alert.status === 'active').map(alert => ({
+                title: alert.name,
+                description: alert.description || 'User-created monitoring alert',
+                type: alert.level,
+                timestamp: new Date(alert.createdAt)
+            }));
+
+            const allLiveAlerts = [...preexistingAlerts, ...deployedAlerts].slice(0, 5);
+            
+            allLiveAlerts.forEach(alert => {
                 const el = document.createElement('div');
-                el.className = `alert-live alert-${alert.level} fade-in`;
+                el.className = `alert-live alert-${alert.type} fade-in`;
                 el.innerHTML = `
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
-                            <div class="text-sm font-semibold text-gray-900">${alert.name}</div>
-                            <div class="text-xs text-gray-600 mt-1">${alert.description || 'Active monitoring alert'}</div>
+                            <div class="text-sm font-semibold text-gray-900">${alert.title}</div>
+                            <div class="text-xs text-gray-600 mt-1">${alert.description}</div>
                             <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
                                 <span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
-                                LIVE • Created ${new Date(alert.createdAt).toLocaleDateString()}
+                                LIVE • ${alert.timestamp.toLocaleDateString()}
                             </div>
                         </div>
-                        <div class="text-xs font-medium text-gray-500 uppercase">${alert.level}</div>
+                        <div class="text-xs font-medium text-gray-500 uppercase">${alert.type}</div>
                     </div>`;
                 liveAlertsList.appendChild(el);
             });
             
-            // Show message if no live alerts
-            if (liveAlerts.length === 0) {
+            // Show message if no live alerts (shouldn't happen now)
+            if (allLiveAlerts.length === 0) {
                 const emptyEl = document.createElement('div');
                 emptyEl.className = 'text-xs text-gray-500 italic p-2 text-center';
-                emptyEl.textContent = 'No live alerts deployed yet';
+                emptyEl.textContent = 'No live alerts configured';
                 liveAlertsList.appendChild(emptyEl);
             }
         }
