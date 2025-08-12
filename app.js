@@ -2256,15 +2256,9 @@ ORDER BY total_users DESC`,
                 toolbar: { show: false }
             },
             stroke: { curve: 'smooth', width: 3 },
-            colors: ['#56CCF2'],
+            colors: ['#259EDC'],
             fill: {
-                type: 'gradient',
-                gradient: {
-                    shadeIntensity: 1,
-                    opacityFrom: 0.7,
-                    opacityTo: 0.9,
-                    stops: [0, 90, 100]
-                }
+                opacity: 1
             },
             dataLabels: { enabled: false },
             grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
