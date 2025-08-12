@@ -8,6 +8,11 @@
 .sidebar-collapsed { width: 0; padding: 0; overflow: hidden; }
 .spinner { border: 2px solid #e5e7eb; border-top-color: #259EDC; border-radius: 50%; width: 14px; height: 14px; animation: spin 1s linear infinite; display:inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Alert type color styles */
+.alert-item.alert-info { border-left: 4px solid #3b82f6; }
+.alert-item.alert-warning { border-left: 4px solid #f59e0b; }
+.alert-item.alert-critical { border-left: 4px solid #dc2626; }
 /* Snow-Domo 360 Modern Dashboard Styles */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');

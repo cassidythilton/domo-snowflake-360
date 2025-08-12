@@ -1145,63 +1145,112 @@ FROM QUERY_REWRITE_RESULTS</pre>
 
     <!-- Create Alert Modal -->
     <div id="createAlertModal" class="fixed inset-0 z-50 hidden" aria-hidden="true" role="dialog" aria-labelledby="createAlertTitle">
-        <div class="absolute inset-0 bg-black bg-opacity-50" id="createAlertBackdrop"></div>
+        <div class="absolute inset-0 bg-black bg-opacity-60" id="createAlertBackdrop"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden" role="document">
-                <div class="flex items-center justify-between p-5 border-b border-gray-200">
-                    <h2 id="createAlertTitle" class="text-lg font-semibold text-gray-900">Create Alert</h2>
-                    <button id="closeCreateAlert" class="text-gray-400 hover:text-gray-600" aria-label="Close">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden border border-gray-100" role="document">
+                <div class="flex items-center justify-between p-6 bg-gradient-to-r from-gray-50 to-white border-b border-gray-100">
+                    <div>
+                        <h2 id="createAlertTitle" class="text-xl font-semibold text-gray-900">Create Alert</h2>
+                        <p class="text-sm text-gray-500 mt-1">Configure monitoring rules for your data pipelines</p>
+                    </div>
+                    <button id="closeCreateAlert" class="text-gray-400 hover:text-gray-600 transition-colors" aria-label="Close">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
-                <div class="p-5 space-y-4 overflow-y-auto max-h-[70vh]" id="createAlertBody">
+                <div class="p-6 space-y-6 overflow-y-auto max-h-[75vh]" id="createAlertBody">
                     <!-- Name -->
                     <div>
-                        <label for="alertName" class="block text-sm font-medium text-gray-700">Alert Name<span class="text-red-500">*</span></label>
-                        <input id="alertName" type="text" class="mt-1 input w-full" placeholder="e.g., High orphan rate in Orders dataset" maxlength="80" />
-                        <p id="alertNameError" class="mt-1 text-xs text-red-600 hidden">Name must be 3–80 characters and unique.</p>
+                        <label for="alertName" class="block text-sm font-semibold text-gray-800 mb-2">Alert Name<span class="text-red-500 ml-1">*</span></label>
+                        <input id="alertName" type="text" class="mt-1 input w-full !py-3 !px-4 !rounded-lg !border-gray-200 focus:!border-brand-500 focus:!ring-brand-500" placeholder="e.g., High orphan rate in Orders dataset" maxlength="80" />
+                        <p id="alertNameError" class="mt-2 text-xs text-red-600 hidden">Name must be 3–80 characters and unique.</p>
                     </div>
                     <!-- Description -->
                     <div>
-                        <label for="alertDesc" class="block text-sm font-medium text-gray-700">Description</label>
-                        <textarea id="alertDesc" class="mt-1 input w-full h-20" placeholder="Optional details to help your team"></textarea>
+                        <label for="alertDesc" class="block text-sm font-semibold text-gray-800 mb-2">Description</label>
+                        <textarea id="alertDesc" class="mt-1 input w-full h-20 !py-3 !px-4 !rounded-lg !border-gray-200 focus:!border-brand-500 focus:!ring-brand-500" placeholder="Optional details to help your team understand this alert"></textarea>
                     </div>
                     <!-- Datasets -->
                     <div>
-                        <label for="alertDatasets" class="block text-sm font-medium text-gray-700">Dataset(s)<span class="text-red-500">*</span></label>
-                        <select id="alertDatasets" multiple class="mt-1 input w-full h-20"></select>
-                        <p id="alertDatasetsError" class="mt-1 text-xs text-red-600 hidden">Select at least one dataset.</p>
+                        <label for="alertDatasets" class="block text-sm font-semibold text-gray-800 mb-2">Dataset(s)<span class="text-red-500 ml-1">*</span></label>
+                        <select id="alertDatasets" multiple class="mt-1 input w-full h-20 !py-3 !px-4 !rounded-lg !border-gray-200 focus:!border-brand-500 focus:!ring-brand-500"></select>
+                        <p id="alertDatasetsError" class="mt-2 text-xs text-red-600 hidden">Select at least one dataset.</p>
                     </div>
                     <!-- SQL Criteria with Cortex -->
                     <div>
                         <div class="flex items-center justify-between">
-                            <label class="block text-sm font-medium text-gray-700">Criteria (SQL)<span class="text-red-500">*</span></label>
-                            <button id="cortexBtn" class="btn btn-secondary !px-2 !py-1 text-xs">Write with Cortex</button>
+                            <label class="block text-sm font-semibold text-gray-800">Criteria (SQL)<span class="text-red-500 ml-1">*</span></label>
+                            <button id="cortexBtn" class="btn btn-secondary !px-3 !py-2 text-sm flex items-center gap-2">
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                    <circle cx="12" cy="12" r="1"/>
+                                    <path d="m19 19-2-2m-5 5-2-2"/>
+                                </svg>
+                                Write with Cortex
+                            </button>
                         </div>
-                        <div class="text-xs text-gray-500 mb-2">Return rows when the alert should trigger. Any returned row counts as a match.</div>
-                        <div id="sqlEditor" class="border rounded-lg overflow-hidden" style="min-height: 200px;"></div>
-                        <div class="text-xs text-gray-400 mt-1">Example:
-<pre class="text-[11px] bg-gray-50 p-2 rounded-md overflow-auto">-- Return rows when the alert should fire
+                        <div class="text-sm text-gray-600 mb-3 mt-2">Return rows when the alert should trigger. Any returned row counts as a match.</div>
+                        <div id="sqlEditor" class="border border-gray-200 rounded-xl overflow-hidden shadow-sm" style="min-height: 280px;"></div>
+                        <div class="text-xs text-gray-500 mt-3">Example:
+<pre class="text-[11px] bg-gray-50 p-3 rounded-lg overflow-auto mt-2 border border-gray-100">-- Return rows when the alert should fire
 SELECT dataset, record_id, reason
 FROM data_quality_anomalies
 WHERE anomaly_type = 'COMPLETENESS_COVERAGE' AND score &gt; 3</pre>
                         </div>
-                        <p id="sqlError" class="mt-1 text-xs text-red-600 hidden">Provide a valid SQL statement.</p>
+                        <p id="sqlError" class="mt-2 text-xs text-red-600 hidden">Provide a valid SQL statement.</p>
                     </div>
                     <!-- Type / Level -->
                     <div>
-                        <label for="alertLevel" class="block text-sm font-medium text-gray-700">Alert Type / Level<span class="text-red-500">*</span></label>
-                        <select id="alertLevel" class="mt-1 input w-full">
+                        <label for="alertLevel" class="block text-sm font-semibold text-gray-800 mb-2">Alert Type / Level<span class="text-red-500 ml-1">*</span></label>
+                        <select id="alertLevel" class="mt-1 input w-full !py-3 !px-4 !rounded-lg !border-gray-200 focus:!border-brand-500 focus:!ring-brand-500">
                             <option value="info">Info</option>
                             <option value="warning">Warning</option>
                             <option value="critical">Critical</option>
                         </select>
-                        <p id="alertLevelError" class="mt-1 text-xs text-red-600 hidden">Select a type/level.</p>
+                        <p id="alertLevelError" class="mt-2 text-xs text-red-600 hidden">Select a type/level.</p>
                     </div>
                 </div>
-                <div class="p-5 border-t border-gray-200 flex items-center justify-end gap-2">
-                    <button id="cancelCreateAlert" class="btn btn-secondary">Cancel</button>
-                    <button id="saveCreateAlert" class="btn btn-primary" disabled>Save</button>
+                <div class="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-3">
+                    <button id="cancelCreateAlert" class="btn btn-secondary !px-6 !py-3">Cancel</button>
+                    <button id="saveCreateAlert" class="btn btn-primary !px-6 !py-3" disabled>Create Alert</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Cortex Modal -->
+    <div id="cortexModal" class="fixed inset-0 z-60 hidden">
+        <div class="absolute inset-0 bg-black bg-opacity-70"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl shadow-2xl w-full max-w-lg p-8 text-white">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                <circle cx="12" cy="12" r="1"/>
+                                <path d="m19 19-2-2m-5 5-2-2"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-semibold">Domo AI</h3>
+                    </div>
+                    <button id="closeCortexModal" class="text-white text-opacity-70 hover:text-opacity-100 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-white text-opacity-90 mb-3">Describe the alert rule (natural language):</label>
+                    <div class="relative">
+                        <textarea id="cortexPromptTextarea" 
+                                class="w-full p-4 rounded-xl bg-white bg-opacity-10 border border-white border-opacity-20 text-white placeholder-white placeholder-opacity-60 focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-30 focus:border-opacity-30 resize-none" 
+                                rows="3" 
+                                placeholder="e.g., Notify when duplicate primary keys exceed 0.5%"></textarea>
+                    </div>
+                </div>
+                <div id="cortexStatusMessage" class="mb-4 text-sm text-white text-opacity-80 hidden">Generating SQL...</div>
+                <div id="cortexErrorMessage" class="mb-4 text-sm text-red-200 hidden">Generation failed. Please try again.</div>
+                <div class="flex items-center gap-3">
+                    <button id="cortexCancelBtn" class="flex-1 px-4 py-3 rounded-xl bg-white bg-opacity-10 border border-white border-opacity-20 text-white hover:bg-opacity-20 transition-colors font-medium">Cancel</button>
+                    <button id="cortexGenerateBtn" class="flex-1 px-4 py-3 rounded-xl bg-white text-purple-600 hover:bg-opacity-90 transition-colors font-semibold">Generate SQL</button>
                 </div>
             </div>
         </div>

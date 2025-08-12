@@ -61,47 +61,7 @@ class SnowDomoDashboard {
         const editorContainer = document.getElementById('sqlEditor');
         editorContainer.innerHTML = '';
         this.createAlertEditor = this.createMonacoEditor(editorContainer, '-- Write a SQL query that returns rows when the alert should fire', false);
-        // Add inline Cortex prompt area under header button
-        const cortexBtn = document.getElementById('cortexBtn');
-        if (cortexBtn && !document.getElementById('cortexPromptArea')) {
-            const area = document.createElement('div');
-            area.id = 'cortexPromptArea';
-            area.className = 'mt-2 hidden';
-            area.innerHTML = `
-                <div class="border border-gray-200 rounded-lg p-2 bg-gray-50">
-                    <label class="text-xs text-gray-600">Describe the rule</label>
-                    <div class="flex items-center gap-2 mt-1">
-                        <textarea id="cortexPrompt" class="input flex-1" rows="2" placeholder="e.g., configure an alert on Retail Product Catalog when table exceeds SLA"></textarea>
-                        <button id="cortexGenerate" class="btn btn-secondary whitespace-nowrap">
-                          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/></svg>
-                          Generate
-                        </button>
-                    </div>
-                    <div id="cortexStatus" class="text-[11px] text-gray-500 mt-1 hidden">Generating SQL…</div>
-                    <div id="cortexError" class="text-[11px] text-red-600 mt-1 hidden">Generation failed. Retry.</div>
-                </div>`;
-            editorContainer.parentElement.insertBefore(area, editorContainer);
-            document.getElementById('cortexBtn').addEventListener('click', () => {
-                area.classList.toggle('hidden');
-            });
-            document.getElementById('cortexGenerate').addEventListener('click', async () => {
-                const status = document.getElementById('cortexStatus');
-                const err = document.getElementById('cortexError');
-                status.classList.remove('hidden'); err.classList.add('hidden');
-                try {
-                    const prompt = document.getElementById('cortexPrompt').value;
-                    const sql = await this.generateSQLWithCortex(prompt);
-                    if (this.createAlertEditor) {
-                        this.createAlertEditor.setValue(sql);
-                        this.validateCreateAlertForm();
-                    }
-                } catch (_) {
-                    err.classList.remove('hidden');
-                } finally {
-                    status.classList.add('hidden');
-                }
-            });
-        }
+        // No inline prompt area anymore - using modal
         this.validateCreateAlertForm();
         // Focus trap: focus first input
         setTimeout(() => document.getElementById('alertName')?.focus(), 0);
@@ -183,21 +143,87 @@ class SnowDomoDashboard {
             try {
                 const fired = /error|fail|duplicate|orphan|anomal/i.test(newAlert.sql);
                 if (fired) {
-                    this.newAlertEvents.unshift({ ts: Date.now(), name: newAlert.name, count: Math.floor(Math.random()*5)+1 });
+                    this.newAlertEvents.unshift({ 
+                        id: newAlert.id,
+                        ts: Date.now(), 
+                        name: newAlert.name, 
+                        count: Math.floor(Math.random()*5)+1 
+                    });
                     this.renderAlerts();
                 }
             } catch (_) {}
         }, 2000 + Math.random()*1000);
     }
 
+    // Open custom Cortex modal
+    openCortexModal() {
+        const modal = document.getElementById('cortexModal');
+        if (!modal) return;
+        
+        modal.classList.remove('hidden');
+        
+        // Set up event handlers if not already done
+        if (!modal.hasAttribute('data-handlers-set')) {
+            modal.querySelector('#closeCortexModal').addEventListener('click', () => this.closeCortexModal());
+            modal.querySelector('#cortexCancelBtn').addEventListener('click', () => this.closeCortexModal());
+            modal.querySelector('#cortexGenerateBtn').addEventListener('click', () => this.handleCortexGenerate());
+            modal.setAttribute('data-handlers-set', 'true');
+        }
+        
+        // Clear previous input and messages
+        document.getElementById('cortexPromptTextarea').value = '';
+        document.getElementById('cortexStatusMessage').classList.add('hidden');
+        document.getElementById('cortexErrorMessage').classList.add('hidden');
+        
+        // Focus the textarea
+        setTimeout(() => document.getElementById('cortexPromptTextarea').focus(), 100);
+    }
+
+    closeCortexModal() {
+        const modal = document.getElementById('cortexModal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async handleCortexGenerate() {
+        const prompt = document.getElementById('cortexPromptTextarea').value.trim();
+        if (!prompt) return;
+        
+        const statusEl = document.getElementById('cortexStatusMessage');
+        const errorEl = document.getElementById('cortexErrorMessage');
+        const generateBtn = document.getElementById('cortexGenerateBtn');
+        
+        // Show loading state
+        statusEl.classList.remove('hidden');
+        errorEl.classList.add('hidden');
+        generateBtn.disabled = true;
+        generateBtn.textContent = 'Generating...';
+        
+        try {
+            const sql = await this.generateSQLWithCortex(prompt);
+            if (this.createAlertEditor) {
+                this.createAlertEditor.setValue(sql);
+                this.validateCreateAlertForm();
+            }
+            this.closeCortexModal();
+        } catch (error) {
+            errorEl.classList.remove('hidden');
+            statusEl.classList.add('hidden');
+        } finally {
+            generateBtn.disabled = false;
+            generateBtn.textContent = 'Generate SQL';
+        }
+    }
+
     // Cortex stub for generating SQL from natural language
     async generateSQLWithCortex(prompt) {
-        await new Promise(r => setTimeout(r, 900));
+        await new Promise(r => setTimeout(r, 1200));
         // Simple stubbed responses tailored to Snowflake
         const samples = [
             "SELECT dataset, count(*) AS duplicate_count FROM records GROUP BY dataset HAVING duplicate_count > 0;",
             "SELECT * FROM quality_checks WHERE orphan_rate > 0.05;",
-            "SELECT dataset, run_id, error_message FROM pipeline_runs WHERE status = 'FAILED';"
+            "SELECT dataset, run_id, error_message FROM pipeline_runs WHERE status = 'FAILED';",
+            "SELECT table_name, column_name, violation_count FROM data_validation WHERE rule_type = 'COMPLETENESS' AND violation_count > 100;",
+            "SELECT dataset_name, freshness_hours FROM data_freshness WHERE freshness_hours > 24;"
         ];
         return samples[Math.floor(Math.random()*samples.length)];
     }
@@ -400,30 +426,7 @@ class SnowDomoDashboard {
             this.loadMoreQueries();
         });
 
-        // Cortex button inside Create Alert modal
-        const cortexBtn = document.getElementById('cortexBtn');
-        if (cortexBtn) {
-            cortexBtn.addEventListener('click', async () => {
-                const nl = prompt('Describe the alert rule (natural language):', 'Notify when duplicate primary keys exceed 0.5%');
-                if (!nl) return;
-                const btn = cortexBtn;
-                const original = btn.textContent;
-                btn.textContent = 'Generating SQL…';
-                btn.disabled = true;
-                try {
-                    const sql = await this.generateSQLWithCortex(nl);
-                    if (this.createAlertEditor) {
-                        this.createAlertEditor.setValue(sql);
-                        this.validateCreateAlertForm();
-                    }
-                } catch (e) {
-                    alert('Failed to generate SQL. Please try again.');
-                } finally {
-                    btn.textContent = original;
-                    btn.disabled = false;
-                }
-            });
-        }
+        // Remove old cortex button handler - now handled by openCortexModal
         // Create Alert modal events
         document.getElementById('newAlertBtn').addEventListener('click', () => this.openCreateAlertModal());
         document.getElementById('createAlertBackdrop').addEventListener('click', () => this.closeCreateAlertModal());
@@ -435,6 +438,12 @@ class SnowDomoDashboard {
             document.getElementById(id).addEventListener('input', () => this.validateCreateAlertForm());
             document.getElementById(id).addEventListener('change', () => this.validateCreateAlertForm());
         });
+
+        // Cortex modal events
+        const cortexBtn = document.getElementById('cortexBtn');
+        if (cortexBtn) {
+            cortexBtn.addEventListener('click', () => this.openCortexModal());
+        }
     }
 
     generateMockData() {
@@ -4074,7 +4083,7 @@ ORDER BY total_users DESC`,
             const visibleAlerts = this.alerts.slice(0, 5);
             visibleAlerts.forEach(alert => {
                 const el = document.createElement('div');
-                el.className = `p-3 bg-white border border-gray-200 rounded-lg fade-in`;
+                el.className = `alert-item alert-${alert.type} p-3 bg-white border border-gray-200 rounded-lg fade-in`;
                 el.innerHTML = `
                     <div class="text-sm font-medium text-gray-900">${alert.title}</div>
                     <div class="text-xs text-gray-600">${alert.description}</div>
@@ -4085,19 +4094,26 @@ ORDER BY total_users DESC`,
             if (showMoreButton) showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
         }
 
-        // Created Alerts table
+        // Created Alerts table with zebra striping
         const createdTbody = document.getElementById('createdAlertsList');
-        if (createdTbody) {
+        const createdEmpty = document.getElementById('createdAlertsEmpty');
+        if (createdTbody && createdEmpty) {
             createdTbody.innerHTML = '';
-            this.createdAlerts.forEach(a => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td class="py-1 pr-2 font-medium text-gray-900">${a.name}</td>
-                    <td class="py-1 pr-2 text-gray-700">${a.levelLabel}</td>
-                    <td class="py-1 pr-2 text-gray-600">${a.datasets.join(', ')}</td>
-                    <td class="py-1 pr-2 text-gray-700">${a.status === 'implementing' ? '<span class=\"spinner\" aria-live=\"polite\" aria-label=\"Implementing\"></span> Implementing' : a.status === 'active' ? 'Active' : 'Failed'}</td>`;
-                createdTbody.appendChild(tr);
-            });
+            if (this.createdAlerts.length === 0) {
+                createdEmpty.classList.remove('hidden');
+            } else {
+                createdEmpty.classList.add('hidden');
+                this.createdAlerts.forEach((a, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.className = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="py-1.5 px-2 font-medium text-gray-900">${a.name}</td>
+                        <td class="py-1.5 px-2 text-gray-700">${a.levelLabel}</td>
+                        <td class="py-1.5 px-2 text-gray-600">${a.datasets.join(', ')}</td>
+                        <td class="py-1.5 px-2 text-gray-700">${a.status === 'implementing' ? '<span class=\"spinner\" aria-live=\"polite\" aria-label=\"Implementing\"></span> Implementing' : a.status === 'active' ? 'Active' : 'Failed'}</td>`;
+                    createdTbody.appendChild(tr);
+                });
+            }
         }
 
         // New Alerts activity
@@ -4176,10 +4192,23 @@ ORDER BY total_users DESC`,
         modal.classList.remove('hidden');
         modal.querySelector('#closeResults').onclick = () => modal.classList.add('hidden');
         modal.querySelector('#deployAlert').onclick = () => {
-            // Promote most recent created alert to Active if exists
+            // Promote most recent created alert to the main recommendations list
             const pending = this.createdAlerts.find(a => a.status !== 'active');
             if (pending) {
                 pending.status = 'active';
+                // Add to main alerts with proper styling
+                const alertColors = {
+                    'info': 'info',
+                    'warning': 'warning', 
+                    'critical': 'critical'
+                };
+                this.alerts.unshift({
+                    type: alertColors[pending.level] || 'info',
+                    title: pending.name,
+                    description: pending.description || 'Custom alert rule',
+                    timestamp: new Date(),
+                    metric: 'custom'
+                });
                 this.renderAlerts();
             }
             modal.classList.add('hidden');
@@ -4192,11 +4221,11 @@ ORDER BY total_users DESC`,
         
         hiddenAlerts.forEach(alert => {
             const alertElement = document.createElement('div');
-            alertElement.className = `alert-item alert-${alert.type} fade-in`;
+            alertElement.className = `alert-item alert-${alert.type} p-3 bg-white border border-gray-200 rounded-lg fade-in`;
             alertElement.innerHTML = `
-                <div class="alert-title">${alert.title}</div>
-                <div class="alert-description">${alert.description}</div>
-                <div class="alert-timestamp">${alert.timestamp.toLocaleString()}</div>
+                <div class="text-sm font-medium text-gray-900">${alert.title}</div>
+                <div class="text-xs text-gray-600">${alert.description}</div>
+                <div class="text-[11px] text-gray-400">${alert.timestamp.toLocaleString()}</div>
             `;
             alertsList.appendChild(alertElement);
         });
