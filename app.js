@@ -3650,8 +3650,6 @@ ORDER BY total_users DESC`,
 
     // Query Optimization Methods
     filterQueries() {
-        console.log('filterQueries called, queryRewriteResults length:', this.queryRewriteResults.length);
-        
         const actionFilter = document.getElementById('actionFilter').value;
         const improvementFilter = parseFloat(document.getElementById('improvementFilter').value);
         const sortBy = document.getElementById('sortBy').value;
@@ -3705,8 +3703,6 @@ ORDER BY total_users DESC`,
     renderQueryComparisons() {
         const container = document.getElementById('queryComparisonList');
         container.innerHTML = ''; // Clear existing content
-        
-        console.log('Rendering queries:', this.filteredQueries.length);
         
         // Show all filtered queries (no pagination)
         this.filteredQueries.forEach(query => {
