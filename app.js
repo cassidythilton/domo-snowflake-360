@@ -4335,27 +4335,42 @@ ORDER BY total_users DESC`,
                 }
             ];
 
-            // Add any deployed created alerts to the live alerts
-            const deployedAlerts = this.createdAlerts.filter(alert => alert.status === 'active').map(alert => ({
+            // Add any created alerts to the live alerts (including new ones)
+            const createdLiveAlerts = this.createdAlerts.map(alert => ({
                 title: alert.name,
                 description: alert.description || 'User-created monitoring alert',
                 type: alert.level,
-                timestamp: new Date(alert.createdAt)
+                timestamp: new Date(alert.createdAt),
+                isNew: alert.status === 'implementing', // Mark implementing alerts as new
+                isUserCreated: true
             }));
 
-            const allLiveAlerts = [...preexistingAlerts, ...deployedAlerts].slice(0, 14);
+            const allLiveAlerts = [...preexistingAlerts, ...createdLiveAlerts].slice(0, 14);
             
             allLiveAlerts.forEach(alert => {
                 const el = document.createElement('div');
-                el.className = `alert-live alert-${alert.type} fade-in`;
+                let statusClass = 'alert-live';
+                let statusIndicator = '';
+                let statusText = 'LIVE';
+                
+                // Special styling for new alerts
+                if (alert.isNew) {
+                    statusClass += ' alert-new';
+                    statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>';
+                    statusText = 'NEW';
+                } else {
+                    statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>';
+                }
+                
+                el.className = `${statusClass} alert-${alert.type} fade-in`;
                 el.innerHTML = `
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
                             <div class="text-sm font-semibold text-gray-900">${alert.title}</div>
                             <div class="text-xs text-gray-600 mt-1">${alert.description}</div>
                             <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-                                <span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
-                                LIVE • ${alert.timestamp.toLocaleDateString()}
+                                ${statusIndicator}
+                                ${statusText} • ${alert.timestamp.toLocaleDateString()}
                             </div>
                         </div>
                         <div class="text-xs font-medium text-gray-500 uppercase">${alert.type}</div>

@@ -1048,6 +1048,41 @@ table tbody tr:hover {
     background: linear-gradient(135deg, #CFEAF7 0%, #ffffff 100%);
 }
 
+/* Special styling for new alerts */
+.alert-new {
+    position: relative;
+    border: 2px solid #3B82F6 !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2), 0 4px 8px rgba(0, 0, 0, 0.12) !important;
+}
+
+.alert-new::before {
+    content: 'NEW';
+    position: absolute;
+    top: -8px;
+    right: 8px;
+    background: #3B82F6;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 8px;
+    letter-spacing: 0.5px;
+    z-index: 10;
+}
+
+.alert-new.alert-critical { 
+    background: linear-gradient(135deg, #EBF4FF 0%, #F5E8F3 25%, #ffffff 100%) !important; 
+    border-left-color: #3B82F6 !important;
+}
+.alert-new.alert-warning { 
+    background: linear-gradient(135deg, #EBF4FF 0%, #FCEBD8 25%, #ffffff 100%) !important; 
+    border-left-color: #3B82F6 !important;
+}
+.alert-new.alert-info { 
+    background: linear-gradient(135deg, #EBF4FF 0%, #CFEAF7 25%, #ffffff 100%) !important; 
+    border-left-color: #3B82F6 !important;
+}
+
 /* Legacy alert styles (for backwards compatibility) */
 .alert-critical {
     border-left-color: #A62A92;
