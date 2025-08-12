@@ -720,6 +720,19 @@ WHERE period = :current_period</pre>
                         <div id="wauTrendChart" class="h-80"></div>
                     </div>
 
+                    <!-- Cost vs Utilization Quadrant Analysis -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Cost vs Utilization</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-gray-500 text-right leading-relaxed" style="font-size: 10px;">
+                                    Quadrant analysis of dataset cost efficiency vs utilization.<br/>
+                                    Bubble size = runs, color = success rate.
+                                </span>
+                            </div>
+                        </div>
+                        <div id="costUtilQuadrantChart" class="h-80"></div>
+                    </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">

@@ -35,7 +35,8 @@ class SnowDomoDashboard {
             'OBS_CREDITS_BY_WAREHOUSE': 'OBSCREDITSBYWAREHOUSE',
             'OBS_COST_PER_CREDIT': 'OBSCOSTPERCREDIT',
             'OBS_QUERY_HISTORY_LTD': 'OBSQUERYHISTORYLTD',
-            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS'
+            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS',
+            'OBS_COST_VS_UTILIZATION': 'OBSCOSTVSUTILIZATION'
         };
 
         this.init();
@@ -440,6 +441,28 @@ class SnowDomoDashboard {
             COST_USD: item.COST_USD * (0.5 + Math.random())
         }));
 
+        // OBS_COST_VS_UTILIZATION - using same dataset names as cost data
+        this.data.costVsUtilization = [
+            'HHS_NPI_Registry', 'Transaction Fraud Recommendation', 'AI Chat Sessions', 
+            'AI Services', 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', 'User_Activity_Events',
+            'Salesforce_Connector_Runs', 'Marketing_Campaign_Data', 'Customer_Support_Tickets',
+            'Product_Usage_Analytics', 'Financial_Transactions', 'Inventory_Management',
+            'Employee_Performance_Data', 'Supply_Chain_Logistics', 'Web_Analytics_Data'
+        ].map(dataset => {
+            const baseRuns = Math.floor(Math.random() * 50) + 10;
+            const baseCost = Math.random() * 15 + 0.5;
+            const baseBytesGB = Math.random() * 500 + 10;
+            const successPct = Math.random() * 30 + 70; // 70-100% success rate
+            
+            return {
+                DATASET: dataset,
+                COST_USD: parseFloat(baseCost.toFixed(2)),
+                BYTES_LOADED: Math.floor(baseBytesGB * 1e9), // Convert GB to bytes
+                RUNS: baseRuns,
+                SUCCESS_PCT: parseFloat(successPct.toFixed(1))
+            };
+        });
+
         // OBS_SNOWFLAKE_WAU
         this.data.snowflakeWAU = [
             { ISO_WEEK: 'I25Y-IW30', WAU: 115 },
@@ -826,6 +849,9 @@ ORDER BY total_users DESC`,
                     case 'QUERY_REWRITE_RESULTS':
                         this.queryRewriteResults = data;
                         this.filteredQueries = [...data];
+                        break;
+                    case 'OBS_COST_VS_UTILIZATION':
+                        this.data.costVsUtilization = data;
                         break;
                 }
             });
@@ -2542,6 +2568,415 @@ ORDER BY total_users DESC`,
             }
         });
         this.charts.datasetCostChart.render();
+
+        // Cost vs Utilization Quadrant Chart
+        this.renderCostUtilQuadrantChart();
+    }
+
+    renderCostUtilQuadrantChart() {
+        const container = document.querySelector('#costUtilQuadrantChart');
+        if (!container) {
+            console.warn('Cost vs Utilization container not found');
+            return;
+        }
+
+        try {
+            // Check if data exists
+            if (!this.data.costVsUtilization || !Array.isArray(this.data.costVsUtilization)) {
+                console.warn('Cost vs Utilization data not available:', this.data.costVsUtilization);
+                container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost vs utilization data available</div>';
+                return;
+            }
+
+            console.log('Cost vs Utilization data:', this.data.costVsUtilization);
+
+            // Transform data: util_gb = bytes_loaded / 1e9
+            const transformedData = this.data.costVsUtilization.map(item => ({
+                dataset: item.DATASET,
+                cost_usd: item.COST_USD,
+                util_gb: item.BYTES_LOADED / 1e9,
+                runs: item.RUNS,
+                success_pct: item.SUCCESS_PCT
+            })).filter(item => item.cost_usd > 0 && item.util_gb > 0); // Handle nulls/empties
+
+            if (transformedData.length === 0) {
+                container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost vs utilization data available</div>';
+                return;
+            }
+
+            // Calculate medians for quadrant lines
+            const utilValues = transformedData.map(d => d.util_gb).sort((a, b) => a - b);
+            const costValues = transformedData.map(d => d.cost_usd).sort((a, b) => a - b);
+            const x_med = this.calculateMedian(utilValues);
+            const y_med = this.calculateMedian(costValues);
+
+            // Prepare series data with color scaling by success_pct
+            const seriesData = transformedData.map(item => ({
+                x: parseFloat(item.util_gb.toFixed(2)),
+                y: parseFloat(item.cost_usd.toFixed(2)),
+                z: parseInt(item.runs), // bubble size
+                dataset: item.dataset,
+                success_pct: item.success_pct
+            }));
+
+            const chart = new ApexCharts(container, {
+                series: [{
+                    name: 'Datasets',
+                    data: seriesData
+                }],
+                chart: {
+                    type: 'bubble',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false },
+                    zoom: { enabled: true },
+                    events: {
+                        mounted: (chartContext, config) => {
+                            // Add quadrant background colors after chart renders
+                            this.addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues);
+                        },
+                        updated: (chartContext, config) => {
+                            // Re-add backgrounds on updates
+                            this.addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues);
+                        }
+                    }
+                },
+                xaxis: {
+                    title: { text: 'Domo Dataset Utilization (GB)', style: { color: '#6b7280' } },
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' },
+                        formatter: (val) => val?.toFixed(1) || '0'
+                    }
+                },
+                yaxis: {
+                    title: { text: 'Cost (USD)', style: { color: '#6b7280' } },
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' },
+                        formatter: (val) => `$${val?.toFixed(2) || '0'}`
+                    }
+                },
+                colors: ['#259EDC'], // Default color, overridden by fillColor
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { show: false },
+                annotations: {
+                    xaxis: [{
+                        x: x_med,
+                        borderColor: '#6b7280',
+                        strokeDashArray: 5,
+                        label: { 
+                            text: `Median Util: ${x_med.toFixed(1)}GB`,
+                            style: { 
+                                color: '#374151', 
+                                fontSize: '10px',
+                                background: '#ffffff',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '4px',
+                                padding: '2px 6px'
+                            },
+                            position: 'top',
+                            offsetY: -10
+                        }
+                    }],
+                    yaxis: [{
+                        y: y_med,
+                        borderColor: '#6b7280',
+                        strokeDashArray: 5,
+                        label: { 
+                            text: `Median Cost: $${y_med.toFixed(2)}`,
+                            style: { 
+                                color: '#374151', 
+                                fontSize: '10px',
+                                background: '#ffffff',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '4px',
+                                padding: '2px 6px'
+                            },
+                            position: 'right',
+                            offsetX: 10
+                        }
+                    }],
+                    // Quadrant text labels positioned manually
+                    points: [
+                        // Best Value (bottom right quadrant) - Light Blue
+                        {
+                            x: x_med + (Math.max(...utilValues) - x_med) * 0.5,
+                            y: Math.min(...costValues) + (y_med - Math.min(...costValues)) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Best Value',
+                                style: { 
+                                    background: 'rgba(135, 206, 235, 0.9)', 
+                                    color: '#1e40af', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(135, 206, 235, 1)'
+                                }
+                            }
+                        },
+                        // Optimize & Scale (top right quadrant) - Light Orange
+                        {
+                            x: x_med + (Math.max(...utilValues) - x_med) * 0.5,
+                            y: y_med + (Math.max(...costValues) - y_med) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Optimize & Scale',
+                                style: { 
+                                    background: 'rgba(255, 193, 122, 0.9)', 
+                                    color: '#ea580c', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(255, 193, 122, 1)'
+                                }
+                            }
+                        },
+                        // Monitor (bottom left quadrant) - Light Purple
+                        {
+                            x: Math.min(...utilValues) + (x_med - Math.min(...utilValues)) * 0.5,
+                            y: Math.min(...costValues) + (y_med - Math.min(...costValues)) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Monitor',
+                                style: { 
+                                    background: 'rgba(168, 85, 247, 0.2)', 
+                                    color: '#7c3aed', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(168, 85, 247, 0.5)'
+                                }
+                            }
+                        },
+                        // Rationalize (top left quadrant) - Light Pink
+                        {
+                            x: Math.min(...utilValues) + (x_med - Math.min(...utilValues)) * 0.5,
+                            y: y_med + (Math.max(...costValues) - y_med) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Rationalize',
+                                style: { 
+                                    background: 'rgba(237, 137, 157, 0.3)', 
+                                    color: '#be185d', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(237, 137, 157, 0.6)'
+                                }
+                            }
+                        }
+                    ]
+                },
+                tooltip: {
+                    custom: ({ dataPointIndex }) => {
+                        const data = transformedData[dataPointIndex];
+                        
+                        // Determine quadrant based on data point position relative to medians
+                        let quadrant = '';
+                        let quadrantInfo = {};
+                        
+                        if (data.util_gb >= x_med && data.cost_usd < y_med) {
+                            quadrant = 'Best Value';
+                            quadrantInfo = {
+                                description: 'high util, low cost',
+                                why: 'You move a lot of data for comparatively little spend.',
+                                action: 'Keep schedules; consider modest scale-up if queues appear.',
+                                watch: 'Cost-per-GB and failure rate stay flat or improving.',
+                                color: '#1e40af'
+                            };
+                        } else if (data.util_gb >= x_med && data.cost_usd >= y_med) {
+                            quadrant = 'Optimize & Scale';
+                            quadrantInfo = {
+                                description: 'high util, high cost',
+                                why: 'Heavy, business-critical pipelines that also drive spend.',
+                                action: 'Tune queries, caching, pruning; right-size warehouses; checkpoint long runs.',
+                                watch: 'Cost-per-GB trend should decline after changes.',
+                                color: '#ea580c'
+                            };
+                        } else if (data.util_gb < x_med && data.cost_usd < y_med) {
+                            quadrant = 'Monitor';
+                            quadrantInfo = {
+                                description: 'low util, low cost',
+                                why: 'Light workloads with minimal impact.',
+                                action: 'Keep but reduce frequency or batch; tag as "low priority."',
+                                watch: 'If utilization grows, reassess for optimization or scaling.',
+                                color: '#7c3aed'
+                            };
+                        } else {
+                            quadrant = 'Rationalize';
+                            quadrantInfo = {
+                                description: 'low util, high cost',
+                                why: 'Poor ROI—expensive but little throughput.',
+                                action: 'Consolidate datasets, downsize/auto-suspend warehouses, or deprecate.',
+                                watch: 'Move left/down within 1–2 cycles, or retire.',
+                                color: '#be185d'
+                            };
+                        }
+                        
+                        return `
+                        <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-family: Inter, sans-serif; max-width: 340px;">
+                            <div style="font-weight: 600; color: #111827; margin-bottom: 8px;">${data.dataset}</div>
+                            <div style="font-size: 12px; color: #6b7280; line-height: 1.4; margin-bottom: 10px;">
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Cost:</span> $${data.cost_usd.toFixed(2)}</div>
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Utilization:</span> ${data.util_gb.toFixed(1)} GB</div>
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Runs:</span> ${data.runs}</div>
+                                <div><span style="color: #374151; font-weight: 500;">Success Rate:</span> <span style="color: ${this.getSuccessColor(data.success_pct)}; font-weight: 600;">${data.success_pct.toFixed(1)}%</span></div>
+                            </div>
+                            <div style="border-top: 1px solid #e5e7eb; padding-top: 8px;">
+                                <div style="font-weight: 600; color: ${quadrantInfo.color}; margin-bottom: 6px; font-size: 13px;">
+                                    ${quadrant} (${quadrantInfo.description})
+                                </div>
+                                <div style="color: #374151; font-size: 11px; margin-bottom: 4px; line-height: 1.3;">
+                                    <strong>Why:</strong> ${quadrantInfo.why}
+                                </div>
+                                <div style="color: #374151; font-size: 11px; margin-bottom: 4px; line-height: 1.3;">
+                                    <strong>Action:</strong> ${quadrantInfo.action}
+                                </div>
+                                <div style="color: #374151; font-size: 11px; line-height: 1.3;">
+                                    <strong>Watch:</strong> ${quadrantInfo.watch}
+                                </div>
+                            </div>
+                        </div>`;
+                    }
+                }
+            });
+
+            chart.render();
+            this.charts.costUtilQuadrantChart = chart;
+
+        } catch (e) {
+            console.error('Error rendering cost vs utilization chart:', e);
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Chart unavailable</div>';
+        }
+    }
+
+    // Helper method to calculate median
+    calculateMedian(values) {
+        if (!values || values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 
+            ? (sorted[mid - 1] + sorted[mid]) / 2 
+            : sorted[mid];
+    }
+
+    // Helper method to add quadrant background colors
+    addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues) {
+        try {
+            const chartEl = chartContext.el;
+            // Prefer the grid group so transforms match gridlines/annotations exactly
+            const gridGroup = chartEl.querySelector('g.apexcharts-grid');
+            const plotArea = chartEl.querySelector('.apexcharts-inner');
+            const targetGroup = gridGroup || plotArea;
+
+            if (!targetGroup) return;
+
+            // Remove existing quadrant backgrounds
+            const existingBgs = targetGroup.querySelectorAll('.quadrant-bg');
+            existingBgs.forEach(bg => bg.remove());
+
+            // Get chart dimensions and bounds from globals
+            const w = chartContext.w;
+            const gridRect = {
+                x: w.globals.translateX || 0,
+                y: w.globals.translateY || 0,
+                width: w.globals.gridWidth,
+                height: w.globals.gridHeight
+            };
+
+            if (!gridRect.width || !gridRect.height) return;
+
+            // Use ApexCharts' computed axis extents to ensure perfect alignment
+            const xMin = w.globals.minX;
+            const xMax = w.globals.maxX;
+            const yMin = w.globals.minY;
+            const yMax = w.globals.maxY;
+
+            // Guard against divide-by-zero
+            if (xMax === xMin || yMax === yMin) return;
+
+            // Calculate relative positions using ApexCharts' domain (no extra padding)
+            const xMedRel = (x_med - xMin) / (xMax - xMin);
+            const yMedRel = (y_med - yMin) / (yMax - yMin);
+
+            // Convert to pixel coordinates (SVG y-axis is inverted)
+            const xMedPx = gridRect.x + (xMedRel * gridRect.width);
+            const yMedPx = gridRect.y + ((1 - yMedRel) * gridRect.height);
+
+            // Define quadrant boundaries using proper grid coordinates
+            const gridLeft = gridRect.x;
+            const gridRight = gridRect.x + gridRect.width;
+            const gridTop = gridRect.y;
+            const gridBottom = gridRect.y + gridRect.height;
+
+            const quadrants = [
+                // Bottom-left: Monitor (Purple) - Low util, Low cost
+                {
+                    x: gridLeft,
+                    y: yMedPx,
+                    width: xMedPx - gridLeft,
+                    height: gridBottom - yMedPx,
+                    color: 'rgba(168, 85, 247, 0.1)'
+                },
+                // Bottom-right: Best Value (Blue) - High util, Low cost
+                {
+                    x: xMedPx,
+                    y: yMedPx,
+                    width: gridRight - xMedPx,
+                    height: gridBottom - yMedPx,
+                    color: 'rgba(135, 206, 235, 0.2)'
+                },
+                // Top-left: Rationalize (Pink) - Low util, High cost
+                {
+                    x: gridLeft,
+                    y: gridTop,
+                    width: xMedPx - gridLeft,
+                    height: yMedPx - gridTop,
+                    color: 'rgba(237, 137, 157, 0.15)'
+                },
+                // Top-right: Optimize & Scale (Orange) - High util, High cost
+                {
+                    x: xMedPx,
+                    y: gridTop,
+                    width: gridRight - xMedPx,
+                    height: yMedPx - gridTop,
+                    color: 'rgba(255, 193, 122, 0.2)'
+                }
+            ];
+
+            // Create SVG rectangles for quadrant backgrounds
+            quadrants.forEach((quad) => {
+                if (quad.width > 0 && quad.height > 0) {
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', quad.x);
+                    rect.setAttribute('y', quad.y);
+                    rect.setAttribute('width', quad.width);
+                    rect.setAttribute('height', quad.height);
+                    rect.setAttribute('fill', quad.color);
+                    rect.setAttribute('class', 'quadrant-bg');
+                    rect.style.pointerEvents = 'none';
+                    
+                    // Insert behind existing grid elements for precise alignment
+                    targetGroup.insertBefore(rect, targetGroup.firstChild);
+                }
+            });
+
+        } catch (error) {
+            console.warn('Could not add quadrant backgrounds:', error);
+        }
+    }
+
+    // Helper method to get color based on success percentage
+    getSuccessColor(successPct) {
+        if (successPct >= 95) return '#059669'; // Green for excellent
+        if (successPct >= 85) return '#0891b2'; // Teal for good
+        if (successPct >= 75) return '#7c3aed'; // Purple for fair
+        return '#dc2626'; // Red for poor
     }
 
     // Data processing methods
