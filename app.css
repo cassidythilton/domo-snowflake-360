@@ -1,7 +1,10 @@
-.btn { @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors; }
-.btn-primary { @apply bg-brand-600 text-white hover:bg-brand-700; }
-.btn-secondary { @apply bg-white border border-gray-300 text-gray-700 hover:bg-gray-50; }
-.input { @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500; }
+.btn { display:inline-flex; align-items:center; gap:.5rem; padding:.5rem 1rem; border-radius:.5rem; font-weight:500; transition:background-color .15s ease,color .15s ease; }
+.btn-primary { background: var(--brand-600); color:#fff; }
+.btn-primary:hover { background: var(--brand-700); }
+.btn-secondary { background:#fff; border:1px solid var(--gray-300); color: var(--gray-700); }
+.btn-secondary:hover { background: var(--gray-50); }
+.input { border:1px solid var(--gray-300); border-radius:.375rem; padding:.5rem .75rem; }
+.input:focus { outline:none; box-shadow:0 0 0 2px rgba(37,158,220,.25); border-color:#259EDC; }
 .sidebar-collapsed { width: 0; padding: 0; overflow: hidden; }
 .spinner { border: 2px solid #e5e7eb; border-top-color: #259EDC; border-radius: 50%; width: 14px; height: 14px; animation: spin 1s linear infinite; display:inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }

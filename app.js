@@ -61,6 +61,47 @@ class SnowDomoDashboard {
         const editorContainer = document.getElementById('sqlEditor');
         editorContainer.innerHTML = '';
         this.createAlertEditor = this.createMonacoEditor(editorContainer, '-- Write a SQL query that returns rows when the alert should fire', false);
+        // Add inline Cortex prompt area under header button
+        const cortexBtn = document.getElementById('cortexBtn');
+        if (cortexBtn && !document.getElementById('cortexPromptArea')) {
+            const area = document.createElement('div');
+            area.id = 'cortexPromptArea';
+            area.className = 'mt-2 hidden';
+            area.innerHTML = `
+                <div class="border border-gray-200 rounded-lg p-2 bg-gray-50">
+                    <label class="text-xs text-gray-600">Describe the rule</label>
+                    <div class="flex items-center gap-2 mt-1">
+                        <textarea id="cortexPrompt" class="input flex-1" rows="2" placeholder="e.g., configure an alert on Retail Product Catalog when table exceeds SLA"></textarea>
+                        <button id="cortexGenerate" class="btn btn-secondary whitespace-nowrap">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M2 12h20"/></svg>
+                          Generate
+                        </button>
+                    </div>
+                    <div id="cortexStatus" class="text-[11px] text-gray-500 mt-1 hidden">Generating SQL…</div>
+                    <div id="cortexError" class="text-[11px] text-red-600 mt-1 hidden">Generation failed. Retry.</div>
+                </div>`;
+            editorContainer.parentElement.insertBefore(area, editorContainer);
+            document.getElementById('cortexBtn').addEventListener('click', () => {
+                area.classList.toggle('hidden');
+            });
+            document.getElementById('cortexGenerate').addEventListener('click', async () => {
+                const status = document.getElementById('cortexStatus');
+                const err = document.getElementById('cortexError');
+                status.classList.remove('hidden'); err.classList.add('hidden');
+                try {
+                    const prompt = document.getElementById('cortexPrompt').value;
+                    const sql = await this.generateSQLWithCortex(prompt);
+                    if (this.createAlertEditor) {
+                        this.createAlertEditor.setValue(sql);
+                        this.validateCreateAlertForm();
+                    }
+                } catch (_) {
+                    err.classList.remove('hidden');
+                } finally {
+                    status.classList.add('hidden');
+                }
+            });
+        }
         this.validateCreateAlertForm();
         // Focus trap: focus first input
         setTimeout(() => document.getElementById('alertName')?.focus(), 0);
@@ -304,6 +345,22 @@ class SnowDomoDashboard {
         document.getElementById('showMoreAlerts').addEventListener('click', () => {
             this.showMoreAlerts();
         });
+        // Recommendations collapse toggle with session memory
+        const recsToggle = document.getElementById('recsToggle');
+        if (recsToggle) {
+            const recsState = sessionStorage.getItem('recsCollapsed') === 'true';
+            const recsSection = document.getElementById('recsSection');
+            if (recsState) {
+                recsSection.style.display = 'none';
+                recsToggle.textContent = 'Show';
+            }
+            recsToggle.addEventListener('click', () => {
+                const hidden = recsSection.style.display === 'none';
+                recsSection.style.display = hidden ? '' : 'none';
+                recsToggle.textContent = hidden ? 'Hide' : 'Show';
+                sessionStorage.setItem('recsCollapsed', (!hidden).toString());
+            });
+        }
 
         // Query Details Modal handling
         document.getElementById('closeModal').addEventListener('click', () => {
@@ -4054,13 +4111,79 @@ ORDER BY total_users DESC`,
                 item.innerHTML = `
                     <div class="flex items-center justify-between">
                         <div class="text-[11px] text-gray-500">${new Date(evt.ts).toLocaleString()}</div>
-                        <button class="text-[11px] text-brand-700 hover:underline">View results</button>
+                        <button class="text-[11px] text-brand-700 hover:underline" data-view-results="${evt.id || ''}">View results</button>
                     </div>
                     <div class="text-xs text-gray-800"><span class="font-semibold">${evt.name}</span> fired • ${evt.count} matches</div>`;
                 activity.appendChild(item);
             });
             badge.textContent = String(this.newAlertEvents.length);
+            activity.querySelectorAll('[data-view-results]').forEach(btn => {
+                btn.addEventListener('click', () => this.openResultsModal());
+            });
         }
+    }
+
+    // Simple modal to show mock results and allow Deploy
+    openResultsModal() {
+        const modalId = 'alertResultsModal';
+        let modal = document.getElementById(modalId);
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = modalId;
+            modal.className = 'fixed inset-0 z-50';
+            modal.innerHTML = `
+            <div class="absolute inset-0 bg-black bg-opacity-40"></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+              <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                  <h3 class="text-lg font-semibold text-gray-900">Alert Results</h3>
+                  <button id="closeResults" class="text-gray-400 hover:text-gray-600" aria-label="Close">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                  </button>
+                </div>
+                <div class="p-4 space-y-3">
+                  <div class="text-xs text-gray-500">Showing latest mock matches</div>
+                  <div class="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table class="min-w-full text-[12px]">
+                      <thead class="bg-gray-50 text-gray-600">
+                        <tr><th class="text-left py-1.5 px-2">Dataset</th><th class="text-left py-1.5 px-2">Timestamp</th><th class="text-left py-1.5 px-2">Reason</th></tr>
+                      </thead>
+                      <tbody id="resultsBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="p-4 border-t border-gray-200 flex items-center justify-end gap-2">
+                  <button id="deployAlert" class="btn btn-primary">Deploy</button>
+                </div>
+              </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+        const body = modal.querySelector('#resultsBody');
+        body.innerHTML = '';
+        // mock rows
+        const rows = Array.from({length: 3}).map(() => ({
+            dataset: this.mockDatasets[Math.floor(Math.random()*this.mockDatasets.length)],
+            ts: new Date().toLocaleString(),
+            reason: 'Mock rule matched (example)'
+        }));
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.className = 'odd:bg-white even:bg-gray-50';
+            tr.innerHTML = `<td class="py-1.5 px-2">${r.dataset}</td><td class="py-1.5 px-2">${r.ts}</td><td class="py-1.5 px-2">${r.reason}</td>`;
+            body.appendChild(tr);
+        });
+        modal.classList.remove('hidden');
+        modal.querySelector('#closeResults').onclick = () => modal.classList.add('hidden');
+        modal.querySelector('#deployAlert').onclick = () => {
+            // Promote most recent created alert to Active if exists
+            const pending = this.createdAlerts.find(a => a.status !== 'active');
+            if (pending) {
+                pending.status = 'active';
+                this.renderAlerts();
+            }
+            modal.classList.add('hidden');
+        };
     }
 
     showMoreAlerts() {

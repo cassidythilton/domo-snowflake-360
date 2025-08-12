@@ -1058,11 +1058,11 @@ FROM QUERY_REWRITE_RESULTS</pre>
         </main>
 
         <!-- Alerts Sidebar -->
-        <aside id="alertsSidebar" class="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto">
+        <aside id="alertsSidebar" class="w-96 bg-white border-l border-gray-200 p-6 overflow-y-auto">
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-gray-900">Alerts &amp; Recommendations</h2>
                 <div class="flex items-center gap-2">
-                    <button id="newAlertBtn" class="btn btn-primary !px-3 !py-1.5">+ New Alert</button>
+                    <button id="newAlertBtn" class="btn btn-primary !px-3 !py-1.5 whitespace-nowrap">+ New Alert</button>
                     <button id="closeSidebar" class="text-gray-400 hover:text-gray-600" aria-label="Close alerts sidebar">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -1070,45 +1070,50 @@ FROM QUERY_REWRITE_RESULTS</pre>
                     </button>
                 </div>
             </div>
-
-            <!-- Created Alerts (compact table) -->
-            <div class="mb-6">
-                <div class="flex items-center justify-between mb-2">
-                    <h3 class="text-sm font-semibold text-gray-800">Created Alerts</h3>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full text-xs">
-                        <thead class="text-gray-500">
-                            <tr>
-                                <th class="text-left py-1 pr-2">Name</th>
-                                <th class="text-left py-1 pr-2">Type</th>
-                                <th class="text-left py-1 pr-2">Dataset(s)</th>
-                                <th class="text-left py-1 pr-2">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="createdAlertsList" class="align-top"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Existing recommendations list (kept) -->
+            <!-- Recommendations (collapsible) -->
             <div class="mb-4">
-                <h3 class="text-sm font-semibold text-gray-800 mb-2">Recommendations</h3>
-                <div id="alertsList" class="space-y-4">
-                    <!-- Alerts will be populated by JavaScript -->
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-semibold text-gray-800">Recommendations</h3>
+                    <button id="recsToggle" class="text-xs text-brand-700 hover:underline">Hide</button>
                 </div>
-                <button id="showMoreAlerts" class="w-full mt-4 px-4 py-2 text-sm text-brand-600 hover:text-brand-800 font-medium border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
-                    Show more alerts
-                </button>
+                <div id="recsSection">
+                    <div id="alertsList" class="space-y-4">
+                        <!-- Alerts will be populated by JavaScript -->
+                    </div>
+                    <button id="showMoreAlerts" class="w-full mt-4 px-4 py-2 text-sm text-brand-600 hover:text-brand-800 font-medium border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
+                        Show more alerts
+                    </button>
+                </div>
             </div>
 
             <!-- New Alerts Activity -->
-            <div>
+            <div class="mb-6">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-sm font-semibold text-gray-800">New Alerts</h3>
                     <span id="newAlertsBadge" class="inline-flex items-center justify-center text-[10px] font-semibold bg-brand-100 text-brand-700 rounded-full w-6 h-6">0</span>
                 </div>
                 <div id="newAlertsList" class="space-y-2 text-xs"></div>
+            </div>
+
+            <!-- Created Alerts (compact table) -->
+            <div class="mb-2">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-semibold text-gray-800">Created Alerts</h3>
+                </div>
+                <div class="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table class="min-w-full text-[11px]">
+                        <thead class="bg-gray-50 text-gray-500">
+                            <tr>
+                                <th class="text-left py-1.5 px-2">Name</th>
+                                <th class="text-left py-1.5 px-2">Type</th>
+                                <th class="text-left py-1.5 px-2">Dataset(s)</th>
+                                <th class="text-left py-1.5 px-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="createdAlertsList" class="align-top"></tbody>
+                    </table>
+                    <div id="createdAlertsEmpty" class="p-3 text-[11px] text-gray-500 hidden">No alerts yet. Create one to get started.</div>
+                </div>
             </div>
         </aside>
     </div>
