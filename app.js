@@ -2562,6 +2562,10 @@ ORDER BY total_users DESC`,
         };
         const rowsMed = median(rowsValues);
         const bytesMed = median(bytesValues);
+        
+        // Debug: Log median values to ensure they're different
+        console.log('Rows/min median:', rowsMed, 'Bytes/min median:', bytesMed);
+        
         const rowsMedian = dates.map(d => ({ x: d, y: parseFloat(rowsMed.toFixed(2)) }));
         const bytesMedian = dates.map(d => ({ x: d, y: parseFloat(bytesMed.toFixed(2)) }));
 
