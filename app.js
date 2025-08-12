@@ -2542,7 +2542,10 @@ ORDER BY total_users DESC`,
             // Synthesize rows/sec loosely proportional to bytes
             const bytesItem = this.data.dailyBytes.find(x => new Date(x.RUN_DATE).toISOString().split('T')[0] === date);
             const bytes = bytesItem ? bytesItem.AVG_BYTES_INSERTED : 0;
-            const rows = bytes > 0 ? Math.max(50, Math.round(bytes / (1024 * 1024))) : Math.round(Math.random() * 500 + 100);
+            // Create more independent variation for rows vs bytes
+            const baseRows = bytes > 0 ? Math.round(bytes / (1024 * 1024)) : 200;
+            const variation = 0.7 + Math.random() * 0.6; // 0.7 to 1.3 multiplier
+            const rows = Math.max(50, Math.round(baseRows * variation + Math.random() * 100));
             const rps = rows / 60; // rows per minute, more realistic scale
             const bps = bytes / 60; // bytes per minute
             rowsPerSec.push({ x: date, y: parseFloat(rps.toFixed(2)) });
