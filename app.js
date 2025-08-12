@@ -8,6 +8,8 @@ class SnowDomoDashboard {
         this.charts = {};
         this.data = {};
         this.alerts = [];
+        this.createdAlerts = [];
+        this.newAlertEvents = [];
         this.querySwarmChart = null;
         this.monacoEditor = null;
         this.queryRewriteResults = [];
@@ -42,6 +44,122 @@ class SnowDomoDashboard {
         this.init();
     }
 
+    // Create Alert modal lifecycle
+    openCreateAlertModal() {
+        const modal = document.getElementById('createAlertModal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        // Populate datasets (Mock from seed; Live from placeholder later)
+        const dsSelect = document.getElementById('alertDatasets');
+        dsSelect.innerHTML = '';
+        const list = this.isLiveMode ? (this.liveDatasets || []) : (this.mockDatasets || []);
+        list.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name; dsSelect.appendChild(opt);
+        });
+        // Initialize SQL editor (Monaco or textarea)
+        const editorContainer = document.getElementById('sqlEditor');
+        editorContainer.innerHTML = '';
+        this.createAlertEditor = this.createMonacoEditor(editorContainer, '-- Write a SQL query that returns rows when the alert should fire', false);
+        this.validateCreateAlertForm();
+        // Focus trap: focus first input
+        setTimeout(() => document.getElementById('alertName')?.focus(), 0);
+    }
+
+    closeCreateAlertModal() {
+        const modal = document.getElementById('createAlertModal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        this.createAlertEditor = null;
+        this.pendingAlertDraft = null;
+    }
+
+    handleCancelCreateAlert() {
+        const name = (document.getElementById('alertName').value || '').trim();
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const hasChanges = name.length > 0 || (sql && sql.trim().length > 0);
+        if (hasChanges) {
+            if (!confirm('Discard changes?')) return;
+        }
+        this.closeCreateAlertModal();
+    }
+
+    validateCreateAlertForm() {
+        const nameEl = document.getElementById('alertName');
+        const dsEl = document.getElementById('alertDatasets');
+        const levelEl = document.getElementById('alertLevel');
+        const name = (nameEl.value || '').trim();
+        const datasets = Array.from(dsEl.selectedOptions).map(o => o.value);
+        const level = levelEl.value;
+        const nameValid = name.length >= 3 && name.length <= 80 && !this.createdAlerts.some(a => a.name.toLowerCase() === name.toLowerCase());
+        document.getElementById('alertNameError').classList.toggle('hidden', nameValid);
+        const dsValid = datasets.length > 0;
+        document.getElementById('alertDatasetsError').classList.toggle('hidden', dsValid);
+        const levelValid = !!level;
+        document.getElementById('alertLevelError').classList.toggle('hidden', levelValid);
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const sqlValid = !!sql && sql.trim().length > 0;
+        document.getElementById('sqlError').classList.toggle('hidden', sqlValid);
+        document.getElementById('saveCreateAlert').disabled = !(nameValid && dsValid && levelValid && sqlValid);
+        return { name, datasets, level, sqlValid };
+    }
+
+    async handleSaveCreateAlert() {
+        const nameEl = document.getElementById('alertName');
+        const descEl = document.getElementById('alertDesc');
+        const dsEl = document.getElementById('alertDatasets');
+        const levelEl = document.getElementById('alertLevel');
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const datasets = Array.from(dsEl.selectedOptions).map(o => o.value);
+        const level = levelEl.value;
+        const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
+
+        // Persist (Mock: in-memory)
+        const newAlert = {
+            id: 'mock_' + Math.random().toString(36).slice(2, 9),
+            name: (nameEl.value || '').trim(),
+            description: (descEl.value || '').trim(),
+            datasets,
+            sql,
+            level,
+            levelLabel,
+            status: 'implementing',
+            createdBy: 'You',
+            createdOn: new Date()
+        };
+        this.createdAlerts.unshift(newAlert);
+        this.renderAlerts();
+
+        // Close modal and toast equivalent via console (non-blocking)
+        this.closeCreateAlertModal();
+        console.log(`Implementing alert '${newAlert.name}' …`);
+
+        // Simulate implementing and activation after 2–3s
+        setTimeout(() => {
+            newAlert.status = 'active';
+            this.renderAlerts();
+            // Evaluate mock firing: basic keyword simulation or simple boolean
+            try {
+                const fired = /error|fail|duplicate|orphan|anomal/i.test(newAlert.sql);
+                if (fired) {
+                    this.newAlertEvents.unshift({ ts: Date.now(), name: newAlert.name, count: Math.floor(Math.random()*5)+1 });
+                    this.renderAlerts();
+                }
+            } catch (_) {}
+        }, 2000 + Math.random()*1000);
+    }
+
+    // Cortex stub for generating SQL from natural language
+    async generateSQLWithCortex(prompt) {
+        await new Promise(r => setTimeout(r, 900));
+        // Simple stubbed responses tailored to Snowflake
+        const samples = [
+            "SELECT dataset, count(*) AS duplicate_count FROM records GROUP BY dataset HAVING duplicate_count > 0;",
+            "SELECT * FROM quality_checks WHERE orphan_rate > 0.05;",
+            "SELECT dataset, run_id, error_message FROM pipeline_runs WHERE status = 'FAILED';"
+        ];
+        return samples[Math.floor(Math.random()*samples.length)];
+    }
     init() {
         this.setupEventListeners();
         this.generateMockData();
@@ -187,7 +305,7 @@ class SnowDomoDashboard {
             this.showMoreAlerts();
         });
 
-        // Modal handling
+        // Query Details Modal handling
         document.getElementById('closeModal').addEventListener('click', () => {
             this.closeModal();
         });
@@ -200,6 +318,7 @@ class SnowDomoDashboard {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.closeModal();
+                this.closeCreateAlertModal();
             }
         });
 
@@ -223,9 +342,51 @@ class SnowDomoDashboard {
         document.getElementById('loadMoreQueries').addEventListener('click', () => {
             this.loadMoreQueries();
         });
+
+        // Cortex button inside Create Alert modal
+        const cortexBtn = document.getElementById('cortexBtn');
+        if (cortexBtn) {
+            cortexBtn.addEventListener('click', async () => {
+                const nl = prompt('Describe the alert rule (natural language):', 'Notify when duplicate primary keys exceed 0.5%');
+                if (!nl) return;
+                const btn = cortexBtn;
+                const original = btn.textContent;
+                btn.textContent = 'Generating SQL…';
+                btn.disabled = true;
+                try {
+                    const sql = await this.generateSQLWithCortex(nl);
+                    if (this.createAlertEditor) {
+                        this.createAlertEditor.setValue(sql);
+                        this.validateCreateAlertForm();
+                    }
+                } catch (e) {
+                    alert('Failed to generate SQL. Please try again.');
+                } finally {
+                    btn.textContent = original;
+                    btn.disabled = false;
+                }
+            });
+        }
+        // Create Alert modal events
+        document.getElementById('newAlertBtn').addEventListener('click', () => this.openCreateAlertModal());
+        document.getElementById('createAlertBackdrop').addEventListener('click', () => this.closeCreateAlertModal());
+        document.getElementById('closeCreateAlert').addEventListener('click', () => this.closeCreateAlertModal());
+        document.getElementById('cancelCreateAlert').addEventListener('click', () => this.handleCancelCreateAlert());
+        document.getElementById('saveCreateAlert').addEventListener('click', () => this.handleSaveCreateAlert());
+
+        ['alertName','alertDatasets','alertLevel'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => this.validateCreateAlertForm());
+            document.getElementById(id).addEventListener('change', () => this.validateCreateAlertForm());
+        });
     }
 
     generateMockData() {
+        // Seeded dataset names used across charts for Mock mode
+        this.mockDatasets = [
+            'HHS_NPI_Registry','Transaction Fraud Recommendation','Retail Product Catalog','Website Analytics Sessions',
+            'IoT Device Telemetry','Marketing Campaign Attribution','Customer 360 Master','Order Line Items',
+            'Payments Settlement','Support Tickets','Warehouse Inventory','Log Events Aggregated'
+        ];
         const endDate = new Date();
         const startDate = new Date(endDate.getTime() - (this.currentDateRange * 24 * 60 * 60 * 1000));
         // Generate date array
@@ -2506,14 +2667,14 @@ ORDER BY total_users DESC`,
                 fontFamily: 'Inter, sans-serif'
             },
             xaxis: { 
-                title: { text: 'Weekly Active Users', style: { color: '#6b7280' } },
-                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+                title: { text: 'Weekly Active Users', style: { color: '#259EDC' } },
+                labels: { style: { colors: '#259EDC', fontSize: '12px' } }
             },
             yaxis: { 
-                title: { text: 'Credits Consumed', style: { color: '#6b7280' } },
-                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+                title: { text: 'Credits Consumed', style: { color: '#259EDC' } },
+                labels: { style: { colors: '#259EDC', fontSize: '12px' } }
             },
-            colors: ['#56CCF2'],
+            colors: ['#259EDC'],
             markers: {
                 size: 8,
                 strokeWidth: 2,
@@ -2549,7 +2710,7 @@ ORDER BY total_users DESC`,
                     dataLabels: { position: 'top' }
                 } 
             },
-            colors: ['#56CCF2'],
+            colors: ['#259EDC'],
             dataLabels: { 
                 enabled: true,
                 formatter: (val) => `${val.toFixed(3)}`,
@@ -3849,24 +4010,57 @@ ORDER BY total_users DESC`,
     }
 
     renderAlerts() {
+        // Recommendations list (existing)
         const alertsList = document.getElementById('alertsList');
-        alertsList.innerHTML = '';
+        if (alertsList) {
+            alertsList.innerHTML = '';
+            const visibleAlerts = this.alerts.slice(0, 5);
+            visibleAlerts.forEach(alert => {
+                const el = document.createElement('div');
+                el.className = `p-3 bg-white border border-gray-200 rounded-lg fade-in`;
+                el.innerHTML = `
+                    <div class="text-sm font-medium text-gray-900">${alert.title}</div>
+                    <div class="text-xs text-gray-600">${alert.description}</div>
+                    <div class="text-[11px] text-gray-400">${alert.timestamp.toLocaleString()}</div>`;
+                alertsList.appendChild(el);
+            });
+            const showMoreButton = document.getElementById('showMoreAlerts');
+            if (showMoreButton) showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
+        }
 
-        const visibleAlerts = this.alerts.slice(0, 5);
-        
-        visibleAlerts.forEach(alert => {
-            const alertElement = document.createElement('div');
-            alertElement.className = `alert-item alert-${alert.type} fade-in`;
-            alertElement.innerHTML = `
-                <div class="alert-title">${alert.title}</div>
-                <div class="alert-description">${alert.description}</div>
-                <div class="alert-timestamp">${alert.timestamp.toLocaleString()}</div>
-            `;
-            alertsList.appendChild(alertElement);
-        });
+        // Created Alerts table
+        const createdTbody = document.getElementById('createdAlertsList');
+        if (createdTbody) {
+            createdTbody.innerHTML = '';
+            this.createdAlerts.forEach(a => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="py-1 pr-2 font-medium text-gray-900">${a.name}</td>
+                    <td class="py-1 pr-2 text-gray-700">${a.levelLabel}</td>
+                    <td class="py-1 pr-2 text-gray-600">${a.datasets.join(', ')}</td>
+                    <td class="py-1 pr-2 text-gray-700">${a.status === 'implementing' ? '<span class=\"spinner\" aria-live=\"polite\" aria-label=\"Implementing\"></span> Implementing' : a.status === 'active' ? 'Active' : 'Failed'}</td>`;
+                createdTbody.appendChild(tr);
+            });
+        }
 
-        const showMoreButton = document.getElementById('showMoreAlerts');
-        showMoreButton.style.display = this.alerts.length > 5 ? 'block' : 'none';
+        // New Alerts activity
+        const activity = document.getElementById('newAlertsList');
+        const badge = document.getElementById('newAlertsBadge');
+        if (activity && badge) {
+            activity.innerHTML = '';
+            this.newAlertEvents.forEach(evt => {
+                const item = document.createElement('div');
+                item.className = 'p-2 border border-gray-200 rounded-lg bg-white';
+                item.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div class="text-[11px] text-gray-500">${new Date(evt.ts).toLocaleString()}</div>
+                        <button class="text-[11px] text-brand-700 hover:underline">View results</button>
+                    </div>
+                    <div class="text-xs text-gray-800"><span class="font-semibold">${evt.name}</span> fired • ${evt.count} matches</div>`;
+                activity.appendChild(item);
+            });
+            badge.textContent = String(this.newAlertEvents.length);
+        }
     }
 
     showMoreAlerts() {
