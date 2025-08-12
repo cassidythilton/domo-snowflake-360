@@ -732,9 +732,14 @@ class SnowDomoDashboard {
 
         // OBS_SNOWFLAKE_WAU
         this.data.snowflakeWAU = [
-            { ISO_WEEK: 'I25Y-IW30', WAU: 115 },
-            { ISO_WEEK: 'I25Y-IW31', WAU: 119 },
-            { ISO_WEEK: 'I25Y-IW32', WAU: 123 }
+            { ISO_WEEK: 'I25Y-IW26', WAU: 182 },
+            { ISO_WEEK: 'I25Y-IW27', WAU: 195 },
+            { ISO_WEEK: 'I25Y-IW28', WAU: 203 },
+            { ISO_WEEK: 'I25Y-IW29', WAU: 198 },
+            { ISO_WEEK: 'I25Y-IW30', WAU: 215 },
+            { ISO_WEEK: 'I25Y-IW31', WAU: 229 },
+            { ISO_WEEK: 'I25Y-IW32', WAU: 248 },
+            { ISO_WEEK: 'I25Y-IW33', WAU: 267 }
         ];
 
         // OBS_DOMO_DAILY_BYTES
@@ -2877,9 +2882,7 @@ ORDER BY total_users DESC`,
             labels: { colors: '#374151' }
         },
         markers: {
-            size: 2,          // smaller dots
-            strokeWidth: 1,   // thinner outline
-            hover: { sizeOffset: 1 }
+            size: 0           // no markers - lines only
         }
         });
         this.charts.topConnectorsChart.render();
