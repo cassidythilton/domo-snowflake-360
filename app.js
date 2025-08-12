@@ -265,6 +265,7 @@ class SnowDomoDashboard {
         this.generateQueryRewriteData();
         this.renderDashboard();
         this.generateAlerts();
+        this.filterQueries(); // Initialize query optimization tab
         this.setupTooltips();
         this.initializeMonacoEditor();
         this.initializeTheme();
@@ -3649,6 +3650,8 @@ ORDER BY total_users DESC`,
 
     // Query Optimization Methods
     filterQueries() {
+        console.log('filterQueries called, queryRewriteResults length:', this.queryRewriteResults.length);
+        
         const actionFilter = document.getElementById('actionFilter').value;
         const improvementFilter = parseFloat(document.getElementById('improvementFilter').value);
         const sortBy = document.getElementById('sortBy').value;
