@@ -420,17 +420,6 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         <div id="queryPerformanceChart" class="h-80"></div>
                     </div>
 
-                    <!-- Throughput Trend Evolution -->
-                    <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
-                            <h3 class="text-lg font-semibold text-gray-900">Throughput Trend Evolution</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Rows/sec & Bytes/sec over time</span>
-                            </div>
-                        </div>
-                        <div id="throughputTrendChart" class="h-80"></div>
-                    </div>
-
                     <!-- Query Performance Analysis Bee Swarm -->
                     <div class="chart-card">
                         <div class="flex items-center justify-between mb-6">
@@ -445,12 +434,15 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         </div>
                     </div>
 
-                    <!-- Slowest Runs full-width row -->
-                    <div class="grid grid-cols-1 gap-8">
-                        <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Top Slowest Connector Runs</h3>
-                            <div id="slowRunsTable" class="h-80 overflow-auto"></div>
+                    <!-- Throughput Trend Evolution -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Throughput Trend Evolution</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Rows/sec & Bytes/sec over time</span>
+                            </div>
                         </div>
+                        <div id="throughputTrendChart" class="h-80"></div>
                     </div>
 
                     <!-- Failure Rate + Events side-by-side -->
@@ -462,6 +454,14 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         <div class="chart-card">
                             <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Events Timeline</h3>
                             <div id="warehouseEventsChart" class="h-80"></div>
+                        </div>
+                    </div>
+
+                    <!-- Slowest Runs full-width row (moved to bottom) -->
+                    <div class="grid grid-cols-1 gap-8">
+                        <div class="chart-card">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Top Slowest Domo Connector Runs</h3>
+                            <div id="slowRunsTable" class="h-80 overflow-auto"></div>
                         </div>
                     </div>
                 </div>

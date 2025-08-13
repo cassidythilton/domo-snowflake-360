@@ -1239,6 +1239,12 @@ ORDER BY total_users DESC`,
         });
         document.getElementById(`tab-${tabName}`).classList.add('active');
 
+        // Ensure the content area scrolls to the top when switching tabs
+        const scrollContainer = document.querySelector('main .flex-1.overflow-auto');
+        if (scrollContainer) {
+            scrollContainer.scrollTop = 0;
+        }
+
         // Update page title and description
         const titles = {
             'cost': {
