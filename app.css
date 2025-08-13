@@ -1063,11 +1063,13 @@ table tbody tr:hover {
 
 #querySwarmLayout {
     display: flex;
+    flex-direction: column; /* stack mini-views vertically */
     position: relative;
 }
 
 #querySwarmChart {
-    flex-grow: 1;
+    flex: 0 0 auto;
+    width: 100%;
 }
 
 #querySwarmChart > figure {
