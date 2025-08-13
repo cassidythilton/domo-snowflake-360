@@ -1703,6 +1703,8 @@ ORDER BY total_users DESC`,
                 topChart.appendChild(topPlot);
             }
 
+            const chartHeight = 460;
+            const chartMargins = { top: 96, right: 60, bottom: 60, left: 60 };
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
                 x: (d) => d.TOTAL_ELAPSED_TIME,
                 fill: (d) => d.TOTAL_ELAPSED_TIME,
@@ -1710,7 +1712,10 @@ ORDER BY total_users DESC`,
                 gap: 0.4,
                 ticks: 0, // let createBeeSwarm default to a higher tick count
                 dynamic: true,
-                title: (d) => `${d.QUERY_TYPE}: ${d.TOTAL_ELAPSED_TIME}ms`
+                title: (d) => `${d.QUERY_TYPE}: ${d.TOTAL_ELAPSED_TIME}ms`,
+                chartHeight,
+                marginTop: chartMargins.top,
+                marginBottom: chartMargins.bottom
             });
 
             if (!beeSwarmMark) {
@@ -1726,12 +1731,12 @@ ORDER BY total_users DESC`,
                     legend: true,
                     label: "Execution Time (ms) →"
                 },
-                height: 460,
+                height: chartHeight,
                 width: container.offsetWidth - 40,
-                marginLeft: 60,
-                marginRight: 60,
-                marginTop: 56,
-                marginBottom: 60
+                marginLeft: chartMargins.left,
+                marginRight: chartMargins.right,
+                marginTop: chartMargins.top,
+                marginBottom: chartMargins.bottom
             });
             
             container.appendChild(chart);
