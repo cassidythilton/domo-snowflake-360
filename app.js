@@ -1655,7 +1655,7 @@ ORDER BY total_users DESC`,
                     marginRight: 50,
                     x: { domain: [allMin, allMax], label: null, ticks: 0 },
                     y: { ticks: 0 },
-                    marks: [Plot.rectY(binsMark, { fill: '#9ED0F6' })]
+                    marks: [Plot.rectY(binsMark, { x1: 'x1', x2: 'x2', y: 'y', fill: '#9ED0F6' })]
                 });
                 topChart.appendChild(topPlot);
             }
