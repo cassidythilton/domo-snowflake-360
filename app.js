@@ -1443,7 +1443,8 @@ ORDER BY total_users DESC`,
 
         try {
             const gap = options.gap != null ? options.gap : 1;
-            const ticks = options.ticks != null ? options.ticks : 50;
+            // Use many more ticks so the swarm actually settles into a rounded shape
+            const ticks = options.ticks != null ? options.ticks : 200;
             
             const dots = Plot.dot(data, options);
             const render = dots.render;
@@ -1455,15 +1456,19 @@ ORDER BY total_users DESC`,
                 circles.attr('class', 'point');
 
                 const nodes = [];
+                // Default to true beeswarm along x (spread vertically to avoid overlap)
+                const direction = options.direction === 'y' ? 'y' : 'x';
                 const [cx, cy, x, y, forceX, forceY] =
-                    options.direction === "x"
+                    direction === "x"
                         ? ["cx", "cy", "x", "y", d3.forceX, d3.forceY]
                         : ["cy", "cx", "y", "x", d3.forceY, d3.forceX];
                         
                 for (const c of circles) {
+                    // Seed a tiny vertical jitter so the simulation does not start fully colinear
+                    const jitter = (Math.random() - 0.5) * 2;
                     nodes.push({
                         x: +c.getAttribute(cx),
-                        y: +c.getAttribute(cy),
+                        y: (+c.getAttribute(cy) || 0) + jitter,
                         r: +c.getAttribute("r")
                     });
                 }
@@ -1475,13 +1480,14 @@ ORDER BY total_users DESC`,
                     
                     const force = d3
                         .forceSimulation(nodes)
-                        .force("x", forceX((d) => d[x]).strength(0.8))
-                        .force("y", forceY((d) => d[y]).strength(0.05))
+                        // Keep points anchored to their x-positions while allowing vertical relaxation
+                        .force("x", forceX((d) => d[x]).strength(1.0))
+                        .force("y", forceY(0).strength(0.12))
                         .force(
                             "collide",
                             d3.forceCollide()
                                 .radius((d) => d.r + gap)
-                                .iterations(3)
+                                .iterations(4)
                         )
                         .tick(ticks)
                         .stop();
@@ -1693,9 +1699,9 @@ ORDER BY total_users DESC`,
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
                 x: (d) => d.TOTAL_ELAPSED_TIME,
                 fill: (d) => d.TOTAL_ELAPSED_TIME,
-                r: 4,
-                gap: 0.5,
-                ticks: 2,
+                r: 5,
+                gap: 0.4,
+                ticks: 0, // let createBeeSwarm default to a higher tick count
                 dynamic: true,
                 title: (d) => `${d.QUERY_TYPE}: ${d.TOTAL_ELAPSED_TIME}ms`
             });
