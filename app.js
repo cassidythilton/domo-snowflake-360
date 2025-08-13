@@ -1443,8 +1443,8 @@ ORDER BY total_users DESC`,
 
         try {
             const gap = options.gap != null ? options.gap : 1;
-            // Use many more ticks so the swarm actually settles into a rounded shape
-            const ticks = options.ticks != null ? options.ticks : 200;
+            // Enough ticks to settle, but not too many to slow down
+            const ticks = options.ticks != null ? options.ticks : 120;
             
             const dots = Plot.dot(data, options);
             const render = dots.render;
@@ -1479,26 +1479,28 @@ ORDER BY total_users DESC`,
                     });
                 }
                 
+                // Always run the simulation to compute relaxed positions (no animation by default)
+                const update = function() {
+                    circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+                };
+
+                const force = d3
+                    .forceSimulation(nodes)
+                    .force("x", forceX((d) => d[x]).strength(1.0))
+                    .force("y", forceY(centerY).strength(0.12))
+                    .force(
+                        "collide",
+                        d3.forceCollide()
+                            .radius((d) => d.r + gap)
+                            .iterations(4)
+                    )
+                    .tick(ticks)
+                    .stop();
+
+                update();
+
                 if (options.dynamic) {
-                    const update = function() {
-                        circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
-                    };
-                    
-                    const force = d3
-                        .forceSimulation(nodes)
-                        // Keep points anchored to their x-positions while allowing vertical relaxation
-                        .force("x", forceX((d) => d[x]).strength(1.0))
-                        .force("y", forceY(centerY).strength(0.12))
-                        .force(
-                            "collide",
-                            d3.forceCollide()
-                                .radius((d) => d.r + gap)
-                                .iterations(4)
-                        )
-                        .tick(ticks)
-                        .stop();
-                        
-                    update();
+                    // Only animate if explicitly requested
                     force.on("tick", update).restart();
                 }
                 
@@ -1704,15 +1706,15 @@ ORDER BY total_users DESC`,
             }
 
             const chartHeight = 460;
-            const chartMargins = { top: 96, right: 60, bottom: 60, left: 60 };
+            const chartMargins = { top: 10, right: 60, bottom: 55, left: 100 };
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
                 x: (d) => d.TOTAL_ELAPSED_TIME,
                 fill: (d) => d.TOTAL_ELAPSED_TIME,
                 r: 5,
                 gap: 0.4,
                 ticks: 0, // let createBeeSwarm default to a higher tick count
-                dynamic: true,
-                title: (d) => `${d.QUERY_TYPE}: ${d.TOTAL_ELAPSED_TIME}ms`,
+                dynamic: false,
+                title: (d) => `Execution: ${d.TOTAL_ELAPSED_TIME} ms\nType: ${d.QUERY_TYPE}\nDB: ${d.DATABASE_NAME}\nWarehouse: ${d.WAREHOUSE_NAME}`,
                 chartHeight,
                 marginTop: chartMargins.top,
                 marginBottom: chartMargins.bottom
