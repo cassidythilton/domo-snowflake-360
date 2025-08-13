@@ -19,6 +19,8 @@ class SnowDomoDashboard {
         this.currentQueryPage = 1;
         // Feature flags
         this.useInlineSwarmPanel = true; // Inline query details in beehive chart
+        // Interaction state for beehive
+        this.swarmDurationRange = null; // [min,max] in ms, null = all
         
         // Dataset aliases for live data
         this.datasetAliases = {
@@ -1634,7 +1636,11 @@ ORDER BY total_users DESC`,
         container.innerHTML = '';
         
         // Prepare data for bee swarm
-        const swarmData = this.data.queryHistory.slice(0, 500); // Limit for performance
+        let swarmData = this.data.queryHistory.slice(0, 1000); // allow more points while keeping responsive
+        if (this.swarmDurationRange) {
+            const [minSel, maxSel] = this.swarmDurationRange;
+            swarmData = swarmData.filter(d => d.TOTAL_ELAPSED_TIME >= minSel && d.TOTAL_ELAPSED_TIME <= maxSel);
+        }
         
         try {
             // Top mini-view: duration buckets (approximate histogram with Plot)
@@ -1646,23 +1652,41 @@ ORDER BY total_users DESC`,
                 label.textContent = 'Total queries in past 30 days';
                 top.appendChild(label);
 
-                const minDur = d3.min(swarmData, d => d.TOTAL_ELAPSED_TIME);
-                const maxDur = d3.max(swarmData, d => d.TOTAL_ELAPSED_TIME);
+                const allMin = d3.min(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                const allMax = d3.max(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                const bins = Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [allMin, allMax] })(this.data.queryHistory);
+
+                // Render histogram
                 const topPlot = Plot.plot({
                     height: 64,
-                    width: top.clientWidth || undefined,
                     marginLeft: 50,
                     marginRight: 50,
-                    x: { domain: [minDur, maxDur], label: null, ticks: 0 },
+                    x: { domain: [allMin, allMax], label: null, ticks: 0 },
                     y: { ticks: 0 },
-                    marks: [
-                        Plot.rectY(
-                            Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [minDur, maxDur] }),
-                            { fill: '#9ED0F6' }
-                        )
-                    ]
+                    marks: [Plot.rectY(bins, { x1: 'x1', x2: 'x2', y: 'y', fill: '#9ED0F6' })]
                 });
                 top.appendChild(topPlot);
+
+                // Brushing overlay
+                const svg = top.querySelector('svg');
+                if (svg) {
+                    const width = svg.viewBox.baseVal.width || svg.getBoundingClientRect().width;
+                    const height = svg.viewBox.baseVal.height || svg.getBoundingClientRect().height;
+                    const brush = d3.brushX()
+                        .extent([[50, 0], [width - 50, height]])
+                        .on('end', (event) => {
+                            if (!event.selection) {
+                                this.swarmDurationRange = null;
+                            } else {
+                                const [x0, x1] = event.selection;
+                                const scale = d3.scaleLinear().domain([allMin, allMax]).range([50, width - 50]);
+                                const inv = d3.scaleLinear().domain(scale.range()).range(scale.domain());
+                                this.swarmDurationRange = [inv(x0), inv(x1)];
+                            }
+                            this.renderQuerySwarmChart();
+                        });
+                    d3.select(svg).append('g').attr('class', 'brush').call(brush);
+                }
             }
 
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
