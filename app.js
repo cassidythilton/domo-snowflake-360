@@ -1443,8 +1443,8 @@ ORDER BY total_users DESC`,
 
         try {
             const gap = options.gap != null ? options.gap : 1;
-            // Enough ticks to settle, but not too many to slow down
-            const ticks = options.ticks != null ? options.ticks : 120;
+            // Use a sensible default when ticks is 0/undefined/null
+            const ticks = (options.ticks === undefined || options.ticks === null || options.ticks <= 0) ? 120 : options.ticks;
             
             const dots = Plot.dot(data, options);
             const render = dots.render;
@@ -1471,7 +1471,7 @@ ORDER BY total_users DESC`,
                         
                 for (const c of circles) {
                     // Seed a tiny vertical jitter so the simulation does not start fully colinear
-                    const jitter = (Math.random() - 0.5) * 2;
+                    const jitter = (Math.random() - 0.5) * 3;
                     nodes.push({
                         x: +c.getAttribute(cx),
                         y: (+c.getAttribute(cy) || centerY) + jitter,
@@ -1479,30 +1479,41 @@ ORDER BY total_users DESC`,
                     });
                 }
                 
-                // Always run the simulation to compute relaxed positions (no animation by default)
-                const update = function() {
-                    circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
-                };
+	                // Compute relaxed positions using a force simulation
+	                const applyPositions = (useAnimation) => {
+	                    if (useAnimation) {
+	                        circles
+	                            .transition()
+	                            .duration(options.animationDuration != null ? options.animationDuration : 5000)
+	                            .ease(d3.easeCubicOut)
+	                            .attr(cx, (_, i) => nodes[i].x)
+	                            .attr(cy, (_, i) => nodes[i].y);
+	                    } else {
+	                        circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+	                    }
+	                };
 
-                const force = d3
-                    .forceSimulation(nodes)
-                    .force("x", forceX((d) => d[x]).strength(1.0))
-                    .force("y", forceY(centerY).strength(0.12))
-                    .force(
-                        "collide",
-                        d3.forceCollide()
-                            .radius((d) => d.r + gap)
-                            .iterations(4)
-                    )
-                    .tick(ticks)
-                    .stop();
+	                const force = d3
+	                    .forceSimulation(nodes)
+	                    .force("x", forceX((d) => d[x]).strength(1.0))
+	                    .force("y", forceY(centerY).strength(0.12))
+	                    .force(
+	                        "collide",
+	                        d3.forceCollide()
+	                            .radius((d) => d.r + gap)
+	                            .iterations(4)
+	                    )
+	                    .tick(ticks)
+	                    .stop();
 
-                update();
+	                // Apply final positions; animate on initial load if requested
+	                applyPositions(options.animateOnLoad === true);
 
-                if (options.dynamic) {
-                    // Only animate if explicitly requested
-                    force.on("tick", update).restart();
-                }
+	                if (options.dynamic) {
+	                    // For dynamic mode, let the simulation run and update positions continuously
+	                    const update = () => circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+	                    force.on("tick", update).restart();
+	                }
                 
                 circles.on("click", function(ev, index) {
                     self.selectQueryPoint(ev, data[index], circles);
@@ -1641,8 +1652,16 @@ ORDER BY total_users DESC`,
             return;
         }
 
-        const container = document.getElementById('querySwarmChart');
+            const container = document.getElementById('querySwarmChart');
         if (!container) return;
+            // Ensure the SVG content never bleeds outside the card
+            container.style.overflow = 'hidden';
+            // Ensure sufficient height to comfortably fit axes and points
+            const minHeight = 520;
+            const currentH = parseInt(getComputedStyle(container).height);
+            if (!isNaN(currentH) && currentH < minHeight) {
+                container.style.height = `${minHeight}px`;
+            }
         
         // Clear previous chart
         container.innerHTML = '';
@@ -1689,10 +1708,15 @@ ORDER BY total_users DESC`,
                 topChart.innerHTML = '';
                 const allMin = d3.min(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
                 const allMax = d3.max(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
-                const topPlot = Plot.plot({
-                    height: 64,
-                    marginLeft: 50,
-                    marginRight: 50,
+                // Clip and slightly undershoot width to avoid fractional overflow
+                topChart.style.overflow = 'hidden';
+                const topWidthRaw = topChart.clientWidth || topChart.offsetWidth;
+                const topWidth = Math.max(0, Math.floor(topWidthRaw) - 2);
+	                const topPlot = Plot.plot({
+	                    height: 64,
+	                    width: topWidth,
+	                    marginLeft: 60,
+	                    marginRight: 60,
                     x: { domain: [allMin, allMax], label: null, ticks: 0 },
                     y: { ticks: 0 },
                     marks: [
@@ -1705,15 +1729,20 @@ ORDER BY total_users DESC`,
                 topChart.appendChild(topPlot);
             }
 
-            const chartHeight = 460;
-            const chartMargins = { top: 10, right: 60, bottom: 55, left: 100 };
-            const beeSwarmMark = this.createBeeSwarm(swarmData, {
+            const chartHeight = (container.clientHeight || parseInt(getComputedStyle(container).height) || 520);
+            const chartWidthRaw = container.clientWidth || container.offsetWidth;
+            const chartWidth = Math.max(0, Math.floor(chartWidthRaw) - 2);
+            // Increase margins so the axis and tick labels do not overlap points
+            const chartMargins = { top: 20, right: 70, bottom: 80, left: 110 };
+	            const beeSwarmMark = this.createBeeSwarm(swarmData, {
                 x: (d) => d.TOTAL_ELAPSED_TIME,
                 fill: (d) => d.TOTAL_ELAPSED_TIME,
                 r: 5,
                 gap: 0.4,
                 ticks: 0, // let createBeeSwarm default to a higher tick count
-                dynamic: false,
+	                dynamic: false,
+	                animateOnLoad: true,
+	                animationDuration: 5000,
                 title: (d) => `Execution: ${d.TOTAL_ELAPSED_TIME} ms\nType: ${d.QUERY_TYPE}\nDB: ${d.DATABASE_NAME}\nWarehouse: ${d.WAREHOUSE_NAME}`,
                 chartHeight,
                 marginTop: chartMargins.top,
@@ -1733,8 +1762,8 @@ ORDER BY total_users DESC`,
                     legend: true,
                     label: "Execution Time (ms) →"
                 },
-                height: chartHeight,
-                width: container.offsetWidth - 40,
+	                height: chartHeight,
+	                width: chartWidth,
                 marginLeft: chartMargins.left,
                 marginRight: chartMargins.right,
                 marginTop: chartMargins.top,
@@ -1744,20 +1773,31 @@ ORDER BY total_users DESC`,
             container.appendChild(chart);
             this.querySwarmChart = chart;
 
-            // Bottom mini-view: duration rug
-            const bottom = document.getElementById('querySwarmBottom');
-            if (bottom) {
-                bottom.innerHTML = '';
-                const rug = Plot.plot({
-                    height: 64,
-                    marginLeft: 50,
-                    marginRight: 50,
-                    x: { label: null },
-                    y: { tickFormat: () => '' },
-                    marks: [Plot.ruleX(swarmData, { x: d => d.TOTAL_ELAPSED_TIME, stroke: '#c7d7ea', strokeOpacity: 0.6 })]
-                });
-                bottom.appendChild(rug);
+            // Nudge the x-axis down slightly to avoid any overlap with the swarm points
+            try {
+                const xAxis = chart.querySelector('g[aria-label="x-axis"], g[aria-label="x axis"], g[aria-label^="x-axis"]');
+                if (xAxis) {
+                    const transform = xAxis.getAttribute('transform') || '';
+                    const match = /translate\(([^,]+),\s*([^\)]+)\)/.exec(transform);
+                    if (match) {
+                        const tx = parseFloat(match[1]);
+                        const ty = parseFloat(match[2]);
+                        const offset = 40; // px
+                        xAxis.setAttribute('transform', `translate(${isNaN(tx) ? 0 : tx}, ${isNaN(ty) ? 0 : ty + offset})`);
+                        // Bring axis to front so labels render above points
+                        chart.appendChild(xAxis);
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not offset x-axis:', e);
             }
+
+	            // Remove bottom mini-chart (rug) and collapse its space if present
+	            const bottom = document.getElementById('querySwarmBottom');
+	            if (bottom) {
+	                bottom.innerHTML = '';
+	                bottom.classList.add('hidden');
+	            }
         } catch (error) {
             console.error('Error creating bee swarm chart:', error);
             container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Interactive chart unavailable - using fallback</p></div>';
