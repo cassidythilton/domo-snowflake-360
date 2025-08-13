@@ -1456,6 +1456,12 @@ ORDER BY total_users DESC`,
                 circles.attr('class', 'point');
 
                 const nodes = [];
+                // Compute vertical center in plot coordinates so swarm sits in the middle of the chart
+                const totalHeight = options.chartHeight != null ? options.chartHeight : 300;
+                const mTop = options.marginTop != null ? options.marginTop : 20;
+                const mBottom = options.marginBottom != null ? options.marginBottom : 60;
+                const innerHeight = Math.max(0, totalHeight - mTop - mBottom);
+                const centerY = mTop + innerHeight / 2;
                 // Default to true beeswarm along x (spread vertically to avoid overlap)
                 const direction = options.direction === 'y' ? 'y' : 'x';
                 const [cx, cy, x, y, forceX, forceY] =
@@ -1468,7 +1474,7 @@ ORDER BY total_users DESC`,
                     const jitter = (Math.random() - 0.5) * 2;
                     nodes.push({
                         x: +c.getAttribute(cx),
-                        y: (+c.getAttribute(cy) || 0) + jitter,
+                        y: (+c.getAttribute(cy) || centerY) + jitter,
                         r: +c.getAttribute("r")
                     });
                 }
@@ -1482,7 +1488,7 @@ ORDER BY total_users DESC`,
                         .forceSimulation(nodes)
                         // Keep points anchored to their x-positions while allowing vertical relaxation
                         .force("x", forceX((d) => d[x]).strength(1.0))
-                        .force("y", forceY(0).strength(0.12))
+                        .force("y", forceY(centerY).strength(0.12))
                         .force(
                             "collide",
                             d3.forceCollide()
@@ -1721,9 +1727,9 @@ ORDER BY total_users DESC`,
                 },
                 height: 450,
                 width: container.offsetWidth - 40,
-                marginLeft: 50,
-                marginRight: 50,
-                marginTop: 20,
+                marginLeft: 60,
+                marginRight: 60,
+                marginTop: 40,
                 marginBottom: 60
             });
             
