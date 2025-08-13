@@ -1641,21 +1641,26 @@ ORDER BY total_users DESC`,
             const top = document.getElementById('querySwarmTop');
             if (top) {
                 top.innerHTML = '';
-                const buckets = Array.from(
-                    d3.rollup(
-                        swarmData,
-                        v => v.length,
-                        d => Math.floor(d.TOTAL_ELAPSED_TIME / 250)
-                    ),
-                    ([bucket, count]) => ({ bucket, count })
-                ).sort((a,b)=>a.bucket-b.bucket);
+                const label = document.createElement('div');
+                label.className = 'text-xs font-medium text-gray-600 mb-1';
+                label.textContent = 'Total queries in past 30 days';
+                top.appendChild(label);
+
+                const minDur = d3.min(swarmData, d => d.TOTAL_ELAPSED_TIME);
+                const maxDur = d3.max(swarmData, d => d.TOTAL_ELAPSED_TIME);
                 const topPlot = Plot.plot({
                     height: 64,
-                    marginLeft: 40,
-                    marginRight: 40,
-                    x: { tickFormat: () => '' },
-                    y: { tickFormat: () => '' },
-                    marks: [Plot.barY(buckets, { x: 'bucket', y: 'count', fill: '#9ED0F6' })]
+                    width: top.clientWidth || undefined,
+                    marginLeft: 50,
+                    marginRight: 50,
+                    x: { domain: [minDur, maxDur], label: null, ticks: 0 },
+                    y: { ticks: 0 },
+                    marks: [
+                        Plot.rectY(
+                            Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [minDur, maxDur] }),
+                            { fill: '#9ED0F6' }
+                        )
+                    ]
                 });
                 top.appendChild(topPlot);
             }
@@ -1683,7 +1688,7 @@ ORDER BY total_users DESC`,
                     legend: true,
                     label: "Execution Time (ms) →"
                 },
-                height: 300,
+                height: 450,
                 width: container.offsetWidth - 40,
                 marginLeft: 50,
                 marginRight: 50,

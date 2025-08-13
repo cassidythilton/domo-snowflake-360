@@ -407,6 +407,22 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         </div>
                     </div>
 
+                    <!-- Query Performance Analysis Bee Swarm (moved above P95 Trend) -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-semibold text-gray-900">Query Performance Analysis</h3>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-gray-500">Interactive visualization</span>
+                            </div>
+                        </div>
+                        <div id="querySwarmLayout" class="space-y-3">
+                            <div id="querySwarmTop" class="h-16 w-full"></div>
+                            <div id="querySwarmChart" class="w-full" style="height:450px"></div>
+                            <div id="querySwarmBottom" class="h-16 w-full"></div>
+                            <div id="querySwarmPanel" class="hidden"></div>
+                        </div>
+                    </div>
+
                     <!-- Full Width Charts -->
                     <div class="chart-card">
                         <div class="flex items-center justify-between mb-6">
@@ -418,22 +434,6 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                             </div>
                         </div>
                         <div id="queryPerformanceChart" class="h-80"></div>
-                    </div>
-
-                    <!-- Query Performance Analysis Bee Swarm -->
-                    <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
-                            <h3 class="text-lg font-semibold text-gray-900">Query Performance Analysis</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Interactive visualization</span>
-                            </div>
-                        </div>
-                        <div id="querySwarmLayout" class="space-y-3">
-                            <div id="querySwarmTop" class="h-16 w-full"></div>
-                            <div id="querySwarmChart" class="w-full" style="height:300px"></div>
-                            <div id="querySwarmBottom" class="h-16 w-full"></div>
-                            <div id="querySwarmPanel" class="hidden"></div>
-                        </div>
                     </div>
 
                     <!-- Throughput Trend Evolution -->
@@ -1279,4 +1279,5 @@ WHERE anomaly_type = 'COMPLETENESS_COVERAGE' AND score &gt; 3</pre>
 
     <script src="app.js"></script>
 
+</body></html>
 </body></html>
