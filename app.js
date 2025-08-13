@@ -17,6 +17,8 @@ class SnowDomoDashboard {
         this.displayedQueries = [];
         this.queriesPerPage = 15;
         this.currentQueryPage = 1;
+        // Feature flags
+        this.useInlineSwarmPanel = true; // Inline query details in beehive chart
         
         // Dataset aliases for live data
         this.datasetAliases = {
@@ -1524,11 +1526,58 @@ ORDER BY total_users DESC`,
     }
 
     showQueryDetails(queryData) {
+        if (this.useInlineSwarmPanel) {
+            const panel = document.getElementById('querySwarmPanel');
+            if (!panel) return;
+            panel.classList.remove('hidden');
+            panel.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-center justify-between mb-2';
+            const title = document.createElement('h4');
+            title.className = 'text-sm font-semibold text-gray-900';
+            title.textContent = 'Query details';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'text-gray-400 hover:text-gray-600';
+            closeBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+            closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            panel.appendChild(header);
+
+            const fields = [
+                { label: 'Query ID', value: queryData.QUERY_ID },
+                { label: 'Execution Time', value: `${queryData.TOTAL_ELAPSED_TIME}ms` },
+                { label: 'Query Type', value: queryData.QUERY_TYPE },
+                { label: 'Database', value: queryData.DATABASE_NAME },
+                { label: 'Warehouse', value: queryData.WAREHOUSE_NAME },
+                { label: 'SQL text', value: queryData.QUERY_TEXT, code: true }
+            ];
+
+            fields.forEach(f => {
+                const wrap = document.createElement('div');
+                wrap.className = 'mb-3';
+                const lab = document.createElement('div');
+                lab.className = 'text-[11px] font-semibold text-gray-500 mb-1';
+                lab.textContent = f.label;
+                const val = document.createElement('div');
+                if (f.code) {
+                    val.className = 'text-xs text-gray-800 bg-gray-50 border border-gray-200 p-2 rounded font-mono whitespace-pre-wrap';
+                } else {
+                    val.className = 'text-sm text-gray-900';
+                }
+                val.textContent = f.value || 'N/A';
+                wrap.appendChild(lab);
+                wrap.appendChild(val);
+                panel.appendChild(wrap);
+            });
+            return;
+        }
+
+        // Fallback to modal
         const modal = document.getElementById('queryModal');
         const detailsContainer = document.getElementById('queryDetails');
-        
         detailsContainer.innerHTML = '';
-        
         const details = [
             { label: 'Query ID', value: queryData.QUERY_ID },
             { label: 'Execution Time', value: `${queryData.TOTAL_ELAPSED_TIME}ms` },
@@ -1537,15 +1586,12 @@ ORDER BY total_users DESC`,
             { label: 'Warehouse', value: queryData.WAREHOUSE_NAME },
             { label: 'Query Text', value: queryData.QUERY_TEXT }
         ];
-        
         details.forEach(detail => {
             const detailDiv = document.createElement('div');
             detailDiv.className = 'mb-4';
-            
             const label = document.createElement('label');
             label.className = 'block text-sm font-semibold text-gray-700 mb-1';
             label.textContent = detail.label;
-            
             const value = document.createElement('div');
             if (detail.label === 'Query Text') {
                 value.className = 'text-sm text-gray-900 bg-gray-50 p-3 rounded-lg font-mono max-h-32 overflow-y-auto';
@@ -1553,12 +1599,10 @@ ORDER BY total_users DESC`,
                 value.className = 'text-sm text-gray-900';
             }
             value.textContent = detail.value || 'N/A';
-            
             detailDiv.appendChild(label);
             detailDiv.appendChild(value);
             detailsContainer.appendChild(detailDiv);
         });
-        
         modal.classList.remove('hidden');
     }
 

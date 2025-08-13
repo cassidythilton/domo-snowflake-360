@@ -1074,6 +1074,21 @@ table tbody tr:hover {
     margin: 0;
 }
 
+/* Inline beehive details panel (feature-flagged) */
+#querySwarmPanel {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    bottom: 24px;
+    width: 360px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+    border-radius: 12px;
+    padding: 16px;
+    overflow: auto;
+}
+
 /* (Reverted) In-plot query details panel styles removed */
 
 /* Alerts Styling - Updated to use #29B5E8 shades */
