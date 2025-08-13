@@ -1648,14 +1648,14 @@ ORDER BY total_users DESC`,
                 topChart.innerHTML = '';
                 const allMin = d3.min(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
                 const allMax = d3.max(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
-                const binsMark = Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [allMin, allMax] });
+                const binsMark = Plot.binX({ y: 'count', x1: 'x1', x2: 'x2' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [allMin, allMax] });
                 const topPlot = Plot.plot({
                     height: 64,
                     marginLeft: 50,
                     marginRight: 50,
                     x: { domain: [allMin, allMax], label: null, ticks: 0 },
                     y: { ticks: 0 },
-                    marks: [Plot.rectY(binsMark, { x1: 'x1', x2: 'x2', y: 'y', fill: '#9ED0F6' })]
+                    marks: [Plot.rectY(binsMark, { fill: '#9ED0F6' })]
                 });
                 topChart.appendChild(topPlot);
             }
