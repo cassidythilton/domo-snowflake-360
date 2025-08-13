@@ -1638,31 +1638,26 @@ ORDER BY total_users DESC`,
         
         try {
             // Top mini-view: duration buckets (approximate histogram with Plot)
-            const top = document.getElementById('querySwarmTop');
-            if (top) {
-                top.innerHTML = '';
-                const label = document.createElement('div');
-                label.className = 'text-xs font-medium text-gray-600 mb-1';
-                label.textContent = 'Total queries in past 30 days';
-                top.appendChild(label);
-
-                const minDur = d3.min(swarmData, d => d.TOTAL_ELAPSED_TIME);
-                const maxDur = d3.max(swarmData, d => d.TOTAL_ELAPSED_TIME);
+            // Top histogram + metrics
+            const metricsEl = document.getElementById('totalQueriesIn30d');
+            if (metricsEl) {
+                metricsEl.textContent = (this.data.queryHistory.length || 0).toLocaleString();
+            }
+            const topChart = document.getElementById('querySwarmTopChart');
+            if (topChart) {
+                topChart.innerHTML = '';
+                const allMin = d3.min(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                const allMax = d3.max(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                const binsMark = Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [allMin, allMax] });
                 const topPlot = Plot.plot({
                     height: 64,
-                    width: top.clientWidth || undefined,
                     marginLeft: 50,
                     marginRight: 50,
-                    x: { domain: [minDur, maxDur], label: null, ticks: 0 },
+                    x: { domain: [allMin, allMax], label: null, ticks: 0 },
                     y: { ticks: 0 },
-                    marks: [
-                        Plot.rectY(
-                            Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [minDur, maxDur] }),
-                            { fill: '#9ED0F6' }
-                        )
-                    ]
+                    marks: [Plot.rectY(binsMark, { fill: '#9ED0F6' })]
                 });
-                top.appendChild(topPlot);
+                topChart.appendChild(topPlot);
             }
 
             const beeSwarmMark = this.createBeeSwarm(swarmData, {

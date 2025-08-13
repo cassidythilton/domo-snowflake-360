@@ -416,7 +416,15 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                             </div>
                         </div>
                         <div id="querySwarmLayout" class="space-y-3">
-                            <div id="querySwarmTop" class="h-16 w-full"></div>
+                            <div id="querySwarmTop" class="w-full">
+                                <div class="flex items-end gap-6">
+                                    <div id="querySwarmTopMetrics" class="w-56">
+                                        <div class="text-xs text-gray-600">Total queries in past 30 days</div>
+                                        <div id="totalQueriesIn30d" class="text-2xl font-bold text-gray-900">-</div>
+                                    </div>
+                                    <div id="querySwarmTopChart" class="flex-1 h-16"></div>
+                                </div>
+                            </div>
                             <div id="querySwarmChart" class="w-full" style="height:450px"></div>
                             <div id="querySwarmBottom" class="h-16 w-full"></div>
                             <div id="querySwarmPanel" class="hidden"></div>
