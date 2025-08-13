@@ -1444,7 +1444,7 @@ ORDER BY total_users DESC`,
         try {
             const gap = options.gap != null ? options.gap : 1;
             // Use a sensible default when ticks is 0/undefined/null
-            const ticks = (options.ticks === undefined || options.ticks === null || options.ticks <= 0) ? 120 : options.ticks;
+	            const ticks = (options.ticks === undefined || options.ticks === null || options.ticks <= 0) ? 160 : options.ticks;
             
             const dots = Plot.dot(data, options);
             const render = dots.render;
@@ -1469,9 +1469,15 @@ ORDER BY total_users DESC`,
                         ? ["cx", "cy", "x", "y", d3.forceX, d3.forceY]
                         : ["cy", "cx", "y", "x", d3.forceY, d3.forceX];
                         
-                for (const c of circles) {
-                    // Seed a tiny vertical jitter so the simulation does not start fully colinear
-                    const jitter = (Math.random() - 0.5) * 3;
+	                // Helper to generate a mild gaussian-like jitter for a rounder appearance
+	                const jitterPx = (options.initialJitter != null) ? options.initialJitter : 10;
+	                const randNorm = () => {
+	                    // Sum of 3 uniforms to approximate normal (mean 0, range about [-1.5, 1.5])
+	                    return (Math.random() + Math.random() + Math.random() - 1.5);
+	                };
+	                for (const c of circles) {
+	                    // Seed vertical jitter so the simulation does not start fully colinear
+	                    const jitter = randNorm() * jitterPx;
                     nodes.push({
                         x: +c.getAttribute(cx),
                         y: (+c.getAttribute(cy) || centerY) + jitter,
@@ -1495,13 +1501,14 @@ ORDER BY total_users DESC`,
 
 	                const force = d3
 	                    .forceSimulation(nodes)
-	                    .force("x", forceX((d) => d[x]).strength(1.0))
-	                    .force("y", forceY(centerY).strength(0.12))
+	                    .force("x", forceX((d) => d[x]).strength(options.xStrength != null ? options.xStrength : 0.8))
+	                    .force("y", forceY(centerY).strength(options.verticalStrength != null ? options.verticalStrength : 0.08))
+	                    .force("repel", d3.forceManyBody().strength(options.repelStrength != null ? options.repelStrength : -3))
 	                    .force(
 	                        "collide",
 	                        d3.forceCollide()
 	                            .radius((d) => d.r + gap)
-	                            .iterations(4)
+	                            .iterations(5)
 	                    )
 	                    .tick(ticks)
 	                    .stop();
@@ -1734,19 +1741,75 @@ ORDER BY total_users DESC`,
             const chartWidth = Math.max(0, Math.floor(chartWidthRaw) - 2);
             // Increase margins so the axis and tick labels do not overlap points
             const chartMargins = { top: 20, right: 70, bottom: 80, left: 110 };
-	            const beeSwarmMark = this.createBeeSwarm(swarmData, {
-                x: (d) => d.TOTAL_ELAPSED_TIME,
-                fill: (d) => d.TOTAL_ELAPSED_TIME,
-                r: 5,
-                gap: 0.4,
-                ticks: 0, // let createBeeSwarm default to a higher tick count
-	                dynamic: false,
-	                animateOnLoad: true,
-	                animationDuration: 5000,
-                title: (d) => `Execution: ${d.TOTAL_ELAPSED_TIME} ms\nType: ${d.QUERY_TYPE}\nDB: ${d.DATABASE_NAME}\nWarehouse: ${d.WAREHOUSE_NAME}`,
-                chartHeight,
-                marginTop: chartMargins.top,
-                marginBottom: chartMargins.bottom
+// 1) Quantiles + helpers
+            const xv = d => d.TOTAL_ELAPSED_TIME;
+            const xs = swarmData.map(xv).sort(d3.ascending);
+            const q10 = d3.quantileSorted(xs, 0.10);
+            const q35 = d3.quantileSorted(xs, 0.35);  // left bulb → mid-left
+            const q60 = d3.quantileSorted(xs, 0.60);  // mid → just past the waist
+
+            const zone = d => {
+            const x = xv(d);
+            if (x <= q10) return 'leftDeep';
+            if (x <= q35) return 'left';
+            if (x <= q60) return 'waist';
+            return 'right';
+            };
+
+            // 2) Swarm
+            const beeSwarmMark = this.createBeeSwarm(swarmData, {
+            x: d => d.TOTAL_ELAPSED_TIME,
+            fill: d => d.TOTAL_ELAPSED_TIME,
+
+            // Dot footprint: slightly larger + more air => softer, rounder edge
+            r: 4.0,
+            gap: 0.4,
+
+            dynamic: false,
+            animateOnLoad: true,
+            animationDuration: 900,
+
+            // Let the shape “form” organically
+            initialJitter: 12,
+
+            // ── Force magnitudes by zone ──────────────────────────────
+            // Round bulb: very loose X/Y + strong repulsion at far-left,
+            // Tight choke: strong X + strong Y + lower repulsion around the waist
+            xStrength: d => ({
+                leftDeep: 0.82,
+                left:     0.88,
+                waist:    1.01,
+                right:    0.96
+            })[zone(d)],
+
+            verticalStrength: d => ({
+                leftDeep: 0.032,
+                left:     0.055,
+                waist:    0.115,   // <- pinch hard at the waist
+                right:    0.070
+            })[zone(d)],
+
+            repelStrength: d => ({
+                leftDeep: -0.48,   // <- inflate the bulb
+                left:     -0.38,
+                waist:    -0.19,   // <- allow tight packing at center
+                right:    -0.24
+            })[zone(d)],
+
+            // If your implementation exposes these, set them (safe defaults if ignored):
+            alphaDecay: 0.065,
+            alphaMin:   0.0015,
+            velocityDecay: 0.35,
+            collideRadius: d => 4.3 + 0.44 * 0.45,  // r + gap*0.45
+
+            // Tooltip & layout (unchanged)
+            title: d => `Execution: ${d.TOTAL_ELAPSED_TIME} ms
+            Type: ${d.QUERY_TYPE}
+            DB: ${d.DATABASE_NAME}
+            Warehouse: ${d.WAREHOUSE_NAME}`,
+            chartHeight,
+            marginTop: chartMargins.top,
+            marginBottom: chartMargins.bottom
             });
 
             if (!beeSwarmMark) {
@@ -1772,6 +1835,123 @@ ORDER BY total_users DESC`,
             
             container.appendChild(chart);
             this.querySwarmChart = chart;
+
+	            // Rug plot beneath the swarm using the same x-scale
+	            const rugConfig = {
+	                height: 16,
+	                tickWidth: 2,
+	                tickMaxHeight: 12,
+	                bins: 320,
+	                minOpacity: 0.45,
+	                maxOpacity: 0.7
+	            };
+	            const xDomain = [
+	                d3.min(swarmData, d => d.TOTAL_ELAPSED_TIME),
+	                d3.max(swarmData, d => d.TOTAL_ELAPSED_TIME)
+	            ];
+	            const innerWidth = Math.max(0, chartWidth - chartMargins.left - chartMargins.right);
+            // Expand bottom margin slightly to guarantee rug visibility
+            const innerHeight = Math.max(0, chartHeight - chartMargins.top - chartMargins.bottom);
+            if (chartMargins.bottom < 140) {
+                // If margins were customized earlier, ensure there is enough space for rug and x-axis
+                chart.style.height = `${chartHeight + (140 - chartMargins.bottom)}px`;
+            }
+	            const xScale = d3.scaleLinear().domain(xDomain).range([chartMargins.left, chartWidth - chartMargins.right]);
+	            const rugBottomY = chartMargins.top + innerHeight - 6;
+	            const rugTopYBase = rugBottomY - rugConfig.height;
+	            const thresholds = d3.range(rugConfig.bins + 1).map((i) => xDomain[0] + (i * (xDomain[1] - xDomain[0]) / rugConfig.bins));
+	            const binner = d3.bin().domain(xDomain).thresholds(thresholds).value(d => d.TOTAL_ELAPSED_TIME);
+	            const bins = binner(swarmData);
+	            const maxBinCount = bins.reduce((m, b) => Math.max(m, b.length), 0) || 1;
+	            const colorScale = d3.scaleLinear().domain(xDomain).range(["#249EDC", "#A62A92"]).interpolate(d3.interpolateHsl);
+
+	            const oldRug = chart.querySelector('g.rug-layer');
+	            if (oldRug) oldRug.remove();
+	            const rugLayer = d3.select(chart).append('g').attr('class', 'rug-layer');
+
+	            for (const bin of bins) {
+	                if (!bin || bin.length === 0) continue;
+	                const xCenter = xScale((bin.x0 + bin.x1) / 2);
+	                const densityRatio = bin.length / maxBinCount;
+	                const tickHeight = Math.max(2, Math.min(rugConfig.tickMaxHeight, rugConfig.tickMaxHeight * densityRatio));
+	                const y1 = rugBottomY;
+	                const y2 = Math.max(rugTopYBase, y1 - tickHeight);
+	                const stroke = colorScale((bin.x0 + bin.x1) / 2);
+	                const opacity = rugConfig.minOpacity + (rugConfig.maxOpacity - rugConfig.minOpacity) * densityRatio;
+	                // Use rects for crisp rendering and consistent width
+	                rugLayer.append('rect')
+	                    .attr('x', Math.round(xCenter - rugConfig.tickWidth / 2) + 0.5)
+	                    .attr('y', y2)
+	                    .attr('width', rugConfig.tickWidth)
+	                    .attr('height', y1 - y2)
+	                    .attr('fill', stroke)
+	                    .attr('fill-opacity', opacity)
+	                    .attr('shape-rendering', 'crispEdges');
+	            }
+
+	            const tooltipId = 'querySwarmRugTooltip';
+	            let tooltip = document.getElementById(tooltipId);
+	            if (!tooltip) {
+	                tooltip = document.createElement('div');
+	                tooltip.id = tooltipId;
+	                tooltip.style.position = 'absolute';
+	                tooltip.style.pointerEvents = 'none';
+	                tooltip.style.zIndex = '10';
+	                tooltip.style.padding = '4px 6px';
+	                tooltip.style.fontSize = '11px';
+	                tooltip.style.borderRadius = '4px';
+	                tooltip.style.background = 'rgba(17,24,39,0.85)';
+	                tooltip.style.color = '#fff';
+	                tooltip.style.transform = 'translate(-50%, -120%)';
+	                tooltip.style.display = 'none';
+	                container.style.position = 'relative';
+	                container.appendChild(tooltip);
+	            }
+
+	            const hoverZoneHeight = rugConfig.height + 10;
+	            const hoverZone = rugLayer.append('rect')
+	                .attr('x', chartMargins.left)
+	                .attr('y', rugBottomY - hoverZoneHeight)
+	                .attr('width', innerWidth)
+	                .attr('height', hoverZoneHeight)
+	                .attr('fill', 'transparent')
+	                .style('cursor', 'crosshair');
+
+	            let dragStartX = null;
+	            const formatNumber = (v) => {
+	                try { return new Intl.NumberFormat().format(Math.round(v)); } catch { return String(Math.round(v)); }
+	            };
+	            const showTooltip = (evt, bin) => {
+	                if (!bin) return;
+	                const [x0, x1] = [bin.x0, bin.x1];
+	                tooltip.textContent = `${formatNumber(x0)}–${formatNumber(x1)} ms • ${bin.length}`;
+	                tooltip.style.left = `${evt.offsetX}px`;
+	                tooltip.style.top = `${rugBottomY}px`;
+	                tooltip.style.display = 'block';
+	            };
+	            const hideTooltip = () => { tooltip.style.display = 'none'; };
+	            const pickBinAtX = (px) => {
+	                const xVal = xScale.invert(px);
+	                const idx = Math.min(bins.length - 1, Math.max(0, Math.floor((xVal - xDomain[0]) / ((xDomain[1] - xDomain[0]) / rugConfig.bins))));
+	                return bins[idx];
+	            };
+
+	            hoverZone.on('mousemove', (ev) => {
+	                const px = d3.pointer(ev, chart)[0];
+	                const bin = pickBinAtX(px);
+	                showTooltip(ev, bin);
+	            });
+	            hoverZone.on('mouseleave', () => { hideTooltip(); });
+	            hoverZone.on('mousedown', (ev) => { dragStartX = d3.pointer(ev, chart)[0]; });
+	            hoverZone.on('mouseup', (ev) => {
+	                const endX = d3.pointer(ev, chart)[0];
+	                if (dragStartX == null) return;
+	                const [a, b] = dragStartX < endX ? [dragStartX, endX] : [endX, dragStartX];
+	                const xmin = Math.max(xDomain[0], xScale.invert(a));
+	                const xmax = Math.min(xDomain[1], xScale.invert(b));
+	                container.dispatchEvent(new CustomEvent('query-rug-filter', { detail: { xmin, xmax } }));
+	                dragStartX = null;
+	            });
 
             // Nudge the x-axis down slightly to avoid any overlap with the swarm points
             try {
