@@ -1626,6 +1626,8 @@ ORDER BY total_users DESC`,
             
             container.appendChild(chart);
             this.querySwarmChart = chart;
+
+            // Removed top/bottom mini-views (reverted)
         } catch (error) {
             console.error('Error creating bee swarm chart:', error);
             container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Interactive chart unavailable - using fallback</p></div>';
