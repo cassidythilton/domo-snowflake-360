@@ -428,16 +428,11 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                                 <span class="text-sm text-gray-500">Interactive visualization</span>
                             </div>
                         </div>
-                        <div id="querySwarmLayout" class="h-96 relative">
-                            <!-- Top mini-views container -->
-                            <div id="querySwarmTop" class="absolute left-0 right-0" style="top: 0; height: 72px;"></div>
-                            <!-- Main swarm and in-plot details -->
-                            <div class="absolute left-0 right-0" style="top: 72px; bottom: 72px;">
-                                <div id="querySwarmChart" class="w-full h-full"></div>
-                                <div id="querySwarmPanel" class="hidden"></div>
-                            </div>
-                            <!-- Bottom mini-views container -->
-                            <div id="querySwarmBottom" class="absolute left-0 right-0" style="height: 72px; bottom: 0;"></div>
+                        <div id="querySwarmLayout" class="space-y-3">
+                            <div id="querySwarmTop" class="h-16"></div>
+                            <div id="querySwarmChart" class="w-full" style="height:300px"></div>
+                            <div id="querySwarmBottom" class="h-16"></div>
+                            <div id="querySwarmPanel" class="hidden"></div>
                         </div>
                     </div>
 

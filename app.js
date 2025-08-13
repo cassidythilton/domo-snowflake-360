@@ -1593,6 +1593,29 @@ ORDER BY total_users DESC`,
         const swarmData = this.data.queryHistory.slice(0, 500); // Limit for performance
         
         try {
+            // Top mini-view: duration buckets (approximate histogram with Plot)
+            const top = document.getElementById('querySwarmTop');
+            if (top) {
+                top.innerHTML = '';
+                const buckets = Array.from(
+                    d3.rollup(
+                        swarmData,
+                        v => v.length,
+                        d => Math.floor(d.TOTAL_ELAPSED_TIME / 250)
+                    ),
+                    ([bucket, count]) => ({ bucket, count })
+                ).sort((a,b)=>a.bucket-b.bucket);
+                const topPlot = Plot.plot({
+                    height: 64,
+                    marginLeft: 40,
+                    marginRight: 40,
+                    x: { tickFormat: () => '' },
+                    y: { tickFormat: () => '' },
+                    marks: [Plot.barY(buckets, { x: 'bucket', y: 'count', fill: '#9ED0F6' })]
+                });
+                top.appendChild(topPlot);
+            }
+
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
                 x: (d) => d.TOTAL_ELAPSED_TIME,
                 fill: (d) => d.TOTAL_ELAPSED_TIME,
@@ -1627,7 +1650,20 @@ ORDER BY total_users DESC`,
             container.appendChild(chart);
             this.querySwarmChart = chart;
 
-            // Removed top/bottom mini-views (reverted)
+            // Bottom mini-view: duration rug
+            const bottom = document.getElementById('querySwarmBottom');
+            if (bottom) {
+                bottom.innerHTML = '';
+                const rug = Plot.plot({
+                    height: 64,
+                    marginLeft: 50,
+                    marginRight: 50,
+                    x: { label: null },
+                    y: { tickFormat: () => '' },
+                    marks: [Plot.ruleX(swarmData, { x: d => d.TOTAL_ELAPSED_TIME, stroke: '#c7d7ea', strokeOpacity: 0.6 })]
+                });
+                bottom.appendChild(rug);
+            }
         } catch (error) {
             console.error('Error creating bee swarm chart:', error);
             container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Interactive chart unavailable - using fallback</p></div>';
