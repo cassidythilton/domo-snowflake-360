@@ -862,7 +862,7 @@ class SnowDomoDashboard {
         const databases = ['DOMO', 'COBRA_DEMO_DB', 'TEST_DB', 'INTEGRATIONTESTS', 'CLOUD_DATATRANSFORM_DEV3'];
         const queryWarehouses = ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH'];
         
-        for (let i = 0; i < 5000; i++) {
+        for (let i = 0; i < 2000; i++) {
             const queryId = `01bb${Math.random().toString(36).substr(2, 4)}-0613-${Math.random().toString(36).substr(2, 4)}-0000-ad0d3e${Math.random().toString(36).substr(2, 6)}`;
             const queryType = queryTypes[Math.floor(Math.random() * queryTypes.length)];
             const database = databases[Math.floor(Math.random() * databases.length)];
@@ -1645,8 +1645,8 @@ ORDER BY total_users DESC`,
         // Clear previous chart
         container.innerHTML = '';
         
-        // Prepare data for bee swarm (~<5000 mock queries)
-        const maxPoints = 5000;
+        // Prepare data for bee swarm (~<2000 mock queries)
+        const maxPoints = 2000;
         const swarmData = this.data.queryHistory.slice(0, Math.min(this.data.queryHistory.length, maxPoints));
         
         try {
@@ -1726,11 +1726,11 @@ ORDER BY total_users DESC`,
                     legend: true,
                     label: "Execution Time (ms) →"
                 },
-                height: 450,
+                height: 460,
                 width: container.offsetWidth - 40,
                 marginLeft: 60,
                 marginRight: 60,
-                marginTop: 40,
+                marginTop: 56,
                 marginBottom: 60
             });
             

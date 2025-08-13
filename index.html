@@ -409,10 +409,10 @@ WHERE ACTIVE_PCT &gt; 0</pre>
 
                     <!-- Query Performance Analysis Bee Swarm (moved above P95 Trend) -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center justify-between mb-2">
                             <h3 class="text-lg font-semibold text-gray-900">Query Performance Analysis</h3>
                             <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Interactive visualization</span>
+                                <span class="text-xs text-gray-500 max-w-lg text-right leading-snug">Bee swarm of Snowflake query durations (ms) over the selected period. Each dot is a query; color encodes duration (blue=shorter, purple=longer). Use the histogram above to understand distribution; bottom rug shows density. Click a dot for details.</span>
                             </div>
                         </div>
                         <div id="querySwarmLayout" class="space-y-3">
@@ -426,7 +426,7 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                                     <div id="querySwarmTopChart" class="flex-1 h-16"></div>
                                 </div>
                             </div>
-                            <div id="querySwarmChart" class="w-full" style="height:450px"></div>
+                            <div id="querySwarmChart" class="w-full" style="height:460px; margin-top:8px"></div>
                             <div id="querySwarmBottom" class="h-16 w-full"></div>
                             <div id="querySwarmPanel" class="hidden"></div>
                         </div>
