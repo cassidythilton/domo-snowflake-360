@@ -1594,7 +1594,9 @@ ORDER BY total_users DESC`,
                 lab.textContent = f.label;
                 const val = document.createElement('div');
                 if (f.code) {
-                    val.className = 'text-xs text-gray-800 bg-gray-50 border border-gray-200 p-2 rounded font-mono whitespace-pre-wrap';
+                    val.className = 'text-xs text-gray-800 bg-gray-50 border border-gray-200 p-2 rounded font-mono whitespace-pre-wrap break-words overflow-x-auto';
+                    val.style.maxHeight = '180px';
+                    val.style.overflowY = 'auto';
                 } else {
                     val.className = 'text-sm text-gray-900';
                 }
@@ -1603,6 +1605,10 @@ ORDER BY total_users DESC`,
                 wrap.appendChild(val);
                 panel.appendChild(wrap);
             });
+            // Trim extra bottom whitespace on the final block
+            if (panel.lastElementChild) {
+                panel.lastElementChild.style.marginBottom = '0px';
+            }
             return;
         }
 
@@ -1626,7 +1632,7 @@ ORDER BY total_users DESC`,
             label.textContent = detail.label;
             const value = document.createElement('div');
             if (detail.label === 'Query Text') {
-                value.className = 'text-sm text-gray-900 bg-gray-50 p-3 rounded-lg font-mono max-h-32 overflow-y-auto';
+                value.className = 'text-sm text-gray-900 bg-gray-50 p-3 rounded-lg font-mono max-h-32 overflow-y-auto break-words overflow-x-auto';
             } else {
                 value.className = 'text-sm text-gray-900';
             }
@@ -1756,7 +1762,7 @@ ORDER BY total_users DESC`,
             return 'right';
             };
 
-            // 2) Swarm
+            // 2) SwarmWarehouse Cost Distribution
             const beeSwarmMark = this.createBeeSwarm(swarmData, {
             x: d => d.TOTAL_ELAPSED_TIME,
             fill: d => d.TOTAL_ELAPSED_TIME,
@@ -1835,6 +1841,26 @@ ORDER BY total_users DESC`,
             
             container.appendChild(chart);
             this.querySwarmChart = chart;
+
+            // Auto-select the left-most point and open the inline panel by default (desktop)
+            try {
+                const allCircles = Array.from(d3.select(chart).selectAll('circle').nodes());
+                if (allCircles.length > 0) {
+                    let minIdx = 0;
+                    let minX = parseFloat(allCircles[0].getAttribute('cx')) || 0;
+                    for (let i = 1; i < allCircles.length; i++) {
+                        const x = parseFloat(allCircles[i].getAttribute('cx'));
+                        if (!isNaN(x) && x < minX) { minX = x; minIdx = i; }
+                    }
+                    const fakeEvent = { target: allCircles[minIdx] };
+                    // Ensure inline panel mode on larger screens
+                    const inlineOk = window.innerWidth >= 1024;
+                    const previousInline = this.useInlineSwarmPanel;
+                    if (inlineOk) this.useInlineSwarmPanel = true;
+                    this.selectQueryPoint(fakeEvent, swarmData[minIdx] || swarmData[0], d3.select(chart).selectAll('circle'));
+                    this.useInlineSwarmPanel = previousInline;
+                }
+            } catch (_) {}
 
 	            // Rug plot beneath the swarm using the same x-scale
 	            const rugConfig = {
@@ -2375,6 +2401,17 @@ ORDER BY total_users DESC`,
 
         // Warehouse Cost Distribution (Treemap)
         const warehouseCosts = this.aggregateWarehouseCosts();
+        // Compute dynamic ranges from data distribution (quantiles)
+        const values = warehouseCosts.map(d => d.value || d.y || d.size || 0).filter(v => typeof v === 'number');
+        const sortedVals = [...values].sort((a,b) => a-b);
+        const q = (p) => {
+            if (!sortedVals.length) return 0;
+            const idx = (sortedVals.length - 1) * p;
+            const lo = Math.floor(idx), hi = Math.ceil(idx);
+            if (lo === hi) return sortedVals[lo];
+            const h = idx - lo; return sortedVals[lo] * (1 - h) + sortedVals[hi] * h;
+        };
+        const q33 = q(0.33), q66 = q(0.66);
         this.charts.warehouseTreemap = new ApexCharts(document.querySelector("#warehouseTreemap"), {
             series: [{ data: warehouseCosts }],
             chart: { 
@@ -2389,19 +2426,11 @@ ORDER BY total_users DESC`,
                     shadeIntensity: 0.5,
                     reverseNegativeShade: true,
                     colorScale: {
-                        ranges: [{
-                            from: 0,
-                            to: 50,
-                            color: '#bfdbfe'
-                        }, {
-                            from: 50,
-                            to: 100,
-                            color: '#56CCF2'
-                        }, {
-                            from: 100,
-                            to: 200,
-                            color: '#2F80ED'
-                        }]
+                        ranges: [
+                            { from: Number.NEGATIVE_INFINITY, to: q33, color: '#95CBEE' },
+                            { from: q33, to: q66, color: '#259EDC' },
+                            { from: q66, to: Number.POSITIVE_INFINITY, color: '#A62A92' }
+                        ]
                     }
                 }
             },
@@ -2508,7 +2537,7 @@ ORDER BY total_users DESC`,
                     labels: { style: { colors: '#6b7280', fontSize: '12px' }, formatter: v => '$' + (v ?? 0).toFixed(4) }
                 },
                 colors: ['#259EDC'],
-                fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.7, opacityTo: 0.9, stops: [0, 90, 100] } },
+                fill: { type: 'solid', opacity: 0.95 },
                 dataLabels: { enabled: false },
                 grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
                 legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } },
@@ -3220,6 +3249,100 @@ ORDER BY total_users DESC`,
 
         // E2E Latency Heatmap
         this.renderE2ELatencyHeatmap();
+
+        // Wire Stale Datasets card click to toggle inline details
+        const card = document.getElementById('staleDatasetsCard');
+        const popout = document.getElementById('staleDatasetsPopout');
+        const toggleBtn = document.getElementById('staleDetailsToggle');
+        if (card && popout) {
+            // Build details content from mock freshness (>24h)
+            const staleRows = (this.data.dataFreshness || [])
+                .filter(d => (d.HOURS_SINCE_LAST_RUN || 0) > 24)
+                .sort((a, b) => b.HOURS_SINCE_LAST_RUN - a.HOURS_SINCE_LAST_RUN)
+                .slice(0, 10);
+
+            if (!popout.dataset.initialized) {
+                popout.dataset.initialized = '1';
+                popout.innerHTML = staleRows.length === 0
+                    ? '<div class="text-xs text-gray-500">No stale datasets in the period.</div>'
+                    : staleRows.map(row => {
+                        const lastRun = new Date(Date.now() - row.HOURS_SINCE_LAST_RUN * 3600 * 1000).toLocaleString();
+                        return `
+                        <div class="flex items-start gap-3 py-1.5">
+                            <div class="w-1 rounded bg-orange-300 mt-0.5" style="height: 14px;"></div>
+                            <div class="flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-medium text-[12px] text-gray-900">${row.DATASET}</div>
+                                    <div class="font-mono text-[11px] text-gray-700">${row.HOURS_SINCE_LAST_RUN}h</div>
+                                </div>
+                                <div class="text-[10px] text-gray-500">Last run: ${lastRun} • Warehouse: ${row.WAREHOUSE_NAME || '—'}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                // Hover affordance
+                card.addEventListener('mouseenter', () => { card.style.boxShadow = '0 4px 14px rgba(245,158,11,0.15)'; });
+                card.addEventListener('mouseleave', () => { card.style.boxShadow = ''; });
+
+                const toggle = (e) => {
+                    e.stopPropagation();
+                    const isHidden = popout.classList.contains('hidden');
+                    popout.classList.toggle('hidden', !isHidden);
+                    // Auto scroll into view when opening
+                    if (isHidden) {
+                        setTimeout(() => {
+                            popout.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        }, 0);
+                    }
+                };
+                if (toggleBtn) toggleBtn.addEventListener('click', toggle);
+                // Also allow clicking the metric card to toggle
+                card.addEventListener('click', (e) => {
+                    if (e.target && e.target.closest('#staleDetailsToggle')) return;
+                    toggle(e);
+                });
+            }
+        }
+
+		// Top Slowest Connector Runs Table (Pipeline Health tab)
+		try {
+			const slowestRuns = (this.data.connectorRuns || [])
+				.filter(run => run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
+				.sort((a, b) => b['Run Time Seconds'] - a['Run Time Seconds'])
+				.slice(0, 15);
+			const container = document.getElementById('slowRunsTable');
+			if (container) {
+				let html = `
+					<div class="overflow-auto h-full">
+						<table class="min-w-full">
+							<thead class="bg-gray-50 sticky top-0">
+								<tr>
+									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dataset</th>
+									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run Start</th>
+									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run Time (s)</th>
+									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rows/sec</th>
+									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bytes/sec</th>
+								</tr>
+							</thead>
+							<tbody class="bg-white divide-y divide-gray-200">`;
+				slowestRuns.forEach(run => {
+					html += `
+						<tr class="hover:bg-gray-50">
+							<td class="px-3 py-2 text-sm text-gray-900">${run['Data Source Name']}</td>
+							<td class="px-3 py-2 text-sm text-gray-500">${new Date(run['Start Time']).toLocaleString()}</td>
+							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Run Time Seconds']||0).toLocaleString()}</td>
+							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Rows Per Second']||0).toLocaleString()}</td>
+							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Bytes Per Second']||0).toLocaleString()}</td>
+						</tr>`;
+				});
+				html += '</tbody></table></div>';
+				container.innerHTML = html;
+			}
+		} catch (e) {
+			console.error('Error rendering slow runs table (pipeline):', e);
+			const container = document.getElementById('slowRunsTable');
+			if (container) container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Table unavailable</div>';
+		}
     }
 
     renderAdoptionCharts() {
@@ -3822,7 +3945,7 @@ ORDER BY total_users DESC`,
 
         return Object.entries(warehouseTotals).map(([name, cost]) => ({
             x: name,
-            y: cost.toFixed(2)
+            y: Number(cost.toFixed(2)) // numeric for color scale math
         }));
     }
 
@@ -3944,10 +4067,7 @@ ORDER BY total_users DESC`,
                 row.innerHTML = `
                     <td class="py-4 px-4">
                         <div class="flex items-center">
-                            <div class="w-8 h-8 rounded-lg flex items-center justify-center mr-3"
-                            style="background: linear-gradient(135deg, #95CBEE, #259EDC);"">
-                                <span class="text-white text-xs font-bold">${index + 1}</span>
-                            </div>
+                            <img class="mr-3" src="https://cdn.brandfetch.io/idvpz8K3OK/w/400/h/400/theme/dark/icon.jpeg?c=1dxbfHSJFAPEGdCLU4o5B" alt="Domo logo" style="width:18px; height:18px; display:block; object-fit:contain;"/>
                             <span class="font-medium text-gray-900">${item.DATASET_NAME}</span>
                         </div>
                     </td>
@@ -4940,21 +5060,73 @@ ORDER BY total_users DESC`,
         const tooltip = document.getElementById('tooltip');
         const tooltipContent = tooltip.querySelector('.tooltip-content');
 
-        document.querySelectorAll('[data-tooltip]').forEach(element => {
-            element.addEventListener('mouseenter', (e) => {
-                const text = e.target.getAttribute('data-tooltip');
-                tooltipContent.textContent = text;
-                tooltip.classList.add('visible');
-                
-                const rect = e.target.getBoundingClientRect();
-                tooltip.style.left = rect.left + 'px';
-                tooltip.style.top = (rect.top - tooltip.offsetHeight - 10) + 'px';
-            });
+        const positionTooltip = (target) => {
+            const rect = target.getBoundingClientRect();
+            const scrollY = window.scrollY || document.documentElement.scrollTop;
+            const scrollX = window.scrollX || document.documentElement.scrollLeft;
+            // Default place above, aligned left with a small offset
+            let left = rect.left + scrollX;
+            let top = rect.top + scrollY - tooltip.offsetHeight - 12;
+            // Keep within viewport
+            const maxLeft = scrollX + window.innerWidth - tooltip.offsetWidth - 8;
+            const minLeft = scrollX + 8;
+            left = Math.max(minLeft, Math.min(maxLeft, left));
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+        };
 
-            element.addEventListener('mouseleave', () => {
-                tooltip.classList.remove('visible');
-            });
+        // Attach per-element behavior: hover by default; click when requested
+        document.querySelectorAll('[data-tooltip]').forEach(element => {
+            const trigger = element.getAttribute('data-tooltip-trigger') || 'hover';
+            if (trigger === 'click') {
+                element.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const target = e.currentTarget;
+                    const isVisible = tooltip.classList.contains('visible');
+                    if (isVisible) {
+                        tooltip.classList.remove('visible');
+                        return;
+                    }
+                    const text = target.getAttribute('data-tooltip');
+                    // Light variant and rich content for efficiency score
+                    tooltip.classList.add('light');
+                    tooltipContent.innerHTML = `
+                        <div class="tooltip-title">Efficiency Index (EI)</div>
+                        <div class="tooltip-body">A single number that tells you how efficiently Snowflake compute (credits) is being used to process data. <strong>Lower is better.</strong> An EI of <strong>1.00</strong> means you’re exactly at your chosen baseline; <strong>< 1.00</strong> is more efficient, <strong>> 1.00</strong> is less efficient.</div>
+                    `;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+            } else {
+                element.addEventListener('mouseenter', (e) => {
+                    const target = e.currentTarget;
+                    const text = target.getAttribute('data-tooltip');
+                    tooltip.classList.remove('light');
+                    tooltipContent.textContent = text;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+                element.addEventListener('mouseleave', () => {
+                    tooltip.classList.remove('visible');
+                });
+                element.addEventListener('focus', (e) => {
+                    const target = e.currentTarget;
+                    const text = target.getAttribute('data-tooltip');
+                    tooltipContent.textContent = text;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+                element.addEventListener('blur', () => {
+                    tooltip.classList.remove('visible');
+                });
+            }
         });
+
+        // Hide tooltip when clicking elsewhere, scrolling, or resizing
+        document.addEventListener('click', () => tooltip.classList.remove('visible'));
+        window.addEventListener('scroll', () => tooltip.classList.remove('visible'), { passive: true });
+        window.addEventListener('resize', () => tooltip.classList.remove('visible'));
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') tooltip.classList.remove('visible'); });
     }
 }
 

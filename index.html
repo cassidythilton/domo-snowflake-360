@@ -226,11 +226,18 @@ WHERE USAGE_DATE &gt;= :start_date</pre>
                             </div>
                         </div>
 
-                        <div class="metric-card" data-tooltip="Average cost efficiency score">
+                        <div class="metric-card no-flip">
                             <div class="metric-front">
                                 <div class="flex items-center justify-between">
                                     <div>
-                                        <p class="text-sm text-gray-600 font-medium">Efficiency Score</p>
+                                        <div class="flex items-center gap-1">
+                                            <p class="text-sm text-gray-600 font-medium">Efficiency Score</p>
+                                            <span data-tooltip="Credits per 1M rows normalized against benchmark (lower is better)." data-tooltip-trigger="click" aria-label="Efficiency Score info" class="inline-flex items-center cursor-pointer">
+                                                <svg class="info-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"></path>
+                                                </svg>
+                                            </span>
+                                        </div>
                                         <p class="text-3xl font-bold text-gray-900 mt-2" id="efficiencyScore">87.2%</p>
                                         <p class="text-sm text-green-600 mt-1">+1.8% vs last period</p>
                                     </div>
@@ -296,7 +303,7 @@ WHERE ACTIVE_PCT &gt; 0</pre>
 
                     <!-- Full Width Table -->
                     <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 10 Datasets by Cost</h3>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 10 Domo Datasets by Cost</h3>
                         <div class="overflow-x-auto">
                             <table class="min-w-full" id="datasetCostTable">
                                 <thead>
@@ -468,13 +475,7 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                         </div>
                     </div>
 
-                    <!-- Slowest Runs full-width row (moved to bottom) -->
-                    <div class="grid grid-cols-1 gap-8">
-                        <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Top Slowest Domo Connector Runs</h3>
-                            <div id="slowRunsTable" class="h-80 overflow-auto"></div>
-                        </div>
-                    </div>
+                    <!-- Slowest Runs moved to Pipeline Health tab -->
                 </div>
 
                 <!-- Pipeline Health Tab -->
@@ -525,13 +526,16 @@ WHERE RUN_DATE &gt;= :start_date</pre>
                             </div>
                         </div>
 
-                        <div class="metric-card" data-tooltip="Number of stale datasets (&gt;24h)">
+                        <div id="staleDatasetsCard" class="metric-card no-flip details-affordance cursor-pointer" data-tooltip="Number of stale datasets (&gt;24h)">
                             <div class="metric-front">
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <p class="text-sm text-gray-600 font-medium">Stale Datasets</p>
                                         <p class="text-3xl font-bold text-gray-900 mt-2" id="staleDatasets">3</p>
-                                        <p class="text-sm text-orange-600 mt-1">Needs attention</p>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <p class="text-sm text-orange-600">Needs attention</p>
+                                            <button id="staleDetailsToggle" class="text-[7px] leading-none text-white px-1.5 py-0.5 bg-orange-500 hover:bg-orange-600 rounded shadow-sm transition-colors">Details <span class="inline-block ml-0.5">▾</span></button>
+                                        </div>
                                     </div>
                                     <div class="p-3 bg-orange-100 rounded-xl">
                                         <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -545,6 +549,8 @@ WHERE RUN_DATE &gt;= :start_date</pre>
 FROM OBS_DOMO_DATA_FRESHNESS
 WHERE HOURS_SINCE_LAST_RUN &gt; 24</pre>
                             </div>
+                            <!-- Bottom popout container -->
+                            <div id="staleDatasetsPopout" class="hidden stale-popout"></div>
                         </div>
 
                         <div class="metric-card" data-tooltip="Average daily bytes ingested (MB)">
@@ -610,6 +616,16 @@ WHERE RUN_DATE &gt;= :start_date</pre>
 
                     <!-- Data Freshness Status full-width row -->
                     <div class="grid grid-cols-1 gap-8">
+                        <!-- Top Slowest Domo Connector Runs moved here -->
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Top Slowest Domo Connector Runs</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Longest successful connector executions</span>
+                                </div>
+                            </div>
+                            <div id="slowRunsTable" class="h-80 overflow-auto"></div>
+                        </div>
                         <div class="chart-card">
                             <h3 class="text-lg font-semibold text-gray-900 mb-6">Data Freshness Status</h3>
                             <div class="overflow-x-auto">

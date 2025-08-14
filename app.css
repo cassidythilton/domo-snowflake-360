@@ -957,6 +957,50 @@ body {
     transform: rotateY(0deg);
 }
 
+/* Disable flip interaction for specific cards */
+.metric-card.no-flip:hover .metric-front {
+    transform: none;
+}
+.metric-card.no-flip:hover .metric-back {
+    transform: rotateY(180deg);
+}
+
+.metric-card.no-flip {
+    overflow: visible;
+}
+
+.metric-card.details-affordance {
+    border-color: #fed7aa; /* orange-200 */
+    box-shadow: 0 4px 10px rgba(245, 158, 11, 0.08);
+}
+.metric-card.details-affordance:hover {
+    box-shadow: 0 8px 16px rgba(245, 158, 11, 0.12);
+}
+
+/* Small helper text used under metric labels */
+.efficiency-helper {
+    font-size: 11px;
+    color: var(--gray-500);
+    margin-top: 4px;
+    line-height: 1.35;
+}
+
+/* Info icon next to labels */
+.info-icon {
+    width: 14px;
+    height: 14px;
+    color: var(--gray-400);
+}
+.info-icon:hover {
+    color: var(--gray-600);
+}
+
+/* Ensure stale datasets card and its popout render above adjacent charts/cards */
+#staleDatasetsCard {
+    position: relative;
+    z-index: 1000000;
+}
+
 .metric-back pre {
     white-space: pre-wrap;
     font-size: 11px;
@@ -1081,16 +1125,54 @@ table tbody tr:hover {
     position: absolute;
     top: 24px;
     right: 24px;
-    bottom: 24px;
     width: 360px;
+    max-height: calc(100% - 38px); /* avoid stretching to full height; trims extra bottom whitespace */
     background: #ffffff;
     border: 1px solid #e5e7eb;
     box-shadow: 0 10px 20px rgba(0,0,0,0.08);
     border-radius: 12px;
     padding: 16px;
     overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
+/* Stale datasets popout panel */
+.stale-popout {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 8px); /* always below the card */
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+    border-radius: 10px;
+    padding: 10px;
+    max-height: 220px;
+    overflow: auto;
+    z-index: 1000001; /* ensure above charts and neighboring cards */
+    font-size: 12px; /* slightly smaller, elegant */
+}
+
+.stale-popout::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: 36px;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid #e5e7eb; /* border color */
+}
+.stale-popout::after {
+    content: '';
+    position: absolute;
+    top: -7px;
+    left: 36px;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 7px solid #ffffff; /* fill color */
+}
 /* (Reverted) In-plot query details panel styles removed */
 
 /* Alerts Styling - Updated to use #29B5E8 shades */
@@ -1268,17 +1350,21 @@ table tbody tr:hover {
 /* Tooltip */
 .tooltip {
     position: absolute;
-    z-index: 1000;
-    background: var(--gray-900);
-    color: white;
-    font-size: 12px;
-    padding: 8px 12px;
-    border-radius: 8px;
+    z-index: 10000;
+    background: rgba(17, 24, 39, 0.95);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s ease;
-    max-width: 280px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    transition: opacity 0.06s ease;
+    max-width: 320px;
+    box-shadow: 0 18px 30px rgba(0, 0, 0, 0.22), 0 6px 10px rgba(0, 0, 0, 0.1);
 }
 
 .tooltip.visible {
@@ -1289,10 +1375,36 @@ table tbody tr:hover {
     content: '';
     position: absolute;
     top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-top-color: var(--gray-900);
+    left: 18px;
+    transform: translateX(0);
+    border: 6px solid transparent;
+    border-top-color: rgba(17, 24, 39, 0.95);
+}
+
+/* Light theme variant (used for Efficiency Score tooltip) */
+.tooltip.light {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 22px 34px rgba(0,0,0,0.14), 0 8px 14px rgba(0,0,0,0.08);
+    max-width: 420px;
+}
+.tooltip.light::after {
+    border-top-color: #ffffff;
+}
+.tooltip .tooltip-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+.tooltip.light .tooltip-title {
+    color: #111827;
+}
+.tooltip .tooltip-body {
+    font-weight: 500;
+    color: #e5e7eb;
+}
+.tooltip.light .tooltip-body {
+    color: #374151;
 }
 
 /* Animations */
