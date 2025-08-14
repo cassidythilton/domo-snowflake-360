@@ -1877,3 +1877,5 @@ select:focus {
     background-color: #bbf7d0;
     color: #16a34a;
 }
+
+/* Lift (pp) vs Baseline table now uses standard chart table sizing to match Pipeline Health */

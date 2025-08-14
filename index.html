@@ -963,6 +963,24 @@ WHERE dc.AS_OF_DATE >= :start_date</pre>
                         </div>
                     </div>
 
+                    <!-- Schema Drift → Null Regression Matrix (full width) -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="text-lg font-semibold text-gray-900">Schema Drift → Null Regression Matrix</h3>
+                            <div class="chart-desc">Heatmap of null percentages around the latest schema drift events (−7 to +2 days). Rows list impacted columns and are sorted by absolute lift from baseline. Use this to spot regressions following adds/removes and align issues to specific change dates.</div>
+                        </div>
+                        <div id="schemaNullRegressionMatrix" class="h-96"></div>
+                    </div>
+
+                    <!-- Lift (pp) vs Baseline table (full width) -->
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="text-lg font-semibold text-gray-900">Lift (pp) vs Baseline</h3>
+                            <div class="chart-desc">Ranked table of columns with the largest percentage‑point lift in null rate versus the pre‑drift baseline. Baseline and post windows reflect means over the selected period. Click a row to focus the matrix above on the matching column.</div>
+                        </div>
+                        <div id="schemaNullLiftTable" class="h-80 overflow-auto"></div>
+                    </div>
+
                     <!-- Null Rates & PK Duplicates (1x1) -->
                     <div class="chart-card">
                         <div class="flex items-center justify-between mb-6">

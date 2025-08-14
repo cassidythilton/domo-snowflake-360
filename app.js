@@ -982,6 +982,55 @@ class SnowDomoDashboard {
             DATA_TYPE: ['VARCHAR(255)','INTEGER','TIMESTAMP','BOOLEAN','DECIMAL(10,2)'][Math.floor(Math.random()*5)]
         })).sort((a,b) => b.CHANGE_DATE - a.CHANGE_DATE);
 
+        // OBS_DATA_COMPLETENESS_TALL (mock tall completeness history)
+        // Fields: AS_OF_DATE, TABLE_FQN, COLUMN_NAME, ROW_COUNT, NULL_PCT
+        this.data.dataCompletenessTall = [];
+        const sampleTables = this.mockDatasets.slice(0, 8).map(n => ({
+            dataset: n,
+            catalog: 'DATASETS',
+            schema: 'PUBLIC',
+            table: n.replace(/\s+/g, '_').toUpperCase()
+        }));
+        const colsPool = ['EMAIL','PHONE','ADDRESS','CREATED_AT','UPDATED_AT','STATUS','AMOUNT'];
+        dates.forEach(date => {
+            sampleTables.forEach(t => {
+                const fqn = `${t.catalog}.${t.schema}.${t.table}`;
+                colsPool.forEach(col => {
+                    const base = 0.02 + Math.random() * 0.15; // 2%–17%
+                    const noise = (Math.random() - 0.5) * 0.04; // ±4%
+                    const pct = Math.max(0, Math.min(1, base + noise));
+                    this.data.dataCompletenessTall.push({
+                        AS_OF_DATE: new Date(date),
+                        TABLE_FQN: fqn,
+                        COLUMN_NAME: col,
+                        ROW_COUNT: Math.floor(10000 + Math.random() * 500000),
+                        NULL_PCT: pct
+                    });
+                });
+            });
+        });
+
+        // Inject some step-changes near synthetic drift dates for realism
+        (this.data.schemaDrift || []).slice(0, 20).forEach(drift => {
+            const driftDate = new Date(drift.CHANGE_DATE);
+            const fqn = `${drift.TABLE_CATALOG}.${drift.TABLE_SCHEMA}.${drift.TABLE_NAME.replace(/\s+/g,'_').toUpperCase()}`;
+            const col = drift.COLUMN_NAME;
+            this.data.dataCompletenessTall.forEach(r => {
+                const same = r.TABLE_FQN === fqn && r.COLUMN_NAME === col;
+                if (!same) return;
+                const deltaDays = Math.round((new Date(r.AS_OF_DATE) - driftDate) / 86400000);
+                if (deltaDays >= 0 && deltaDays <= 2) {
+                    r.NULL_PCT = Math.min(1, r.NULL_PCT + 0.10 + Math.random()*0.05);
+                }
+            });
+        });
+
+        // OBS_COMPLETENESS_CONFIG mock mapping for dataset label by TABLE_FQN
+        this.data.completenessConfig = sampleTables.map(t => ({
+            DATASET: t.dataset,
+            TABLE_FQN: `${t.catalog}.${t.schema}.${t.table}`
+        }));
+
         // OBS_COST_PER_CREDIT
         this.data.costPerCredit = [];
         dates.forEach(date => {
@@ -3117,7 +3166,8 @@ ORDER BY total_users DESC`,
         }
     }
     renderQualityCharts() {
-        try { this.renderCoverageAnomaliesChart(); } catch(e){ console.error(e); }
+			try { this.renderCoverageAnomaliesChart(); } catch(e){ console.error(e); }
+			try { this.renderSchemaNullRegressionMatrix(); } catch(e){ console.error(e); }
         try { this.renderNullsAndDupesTable(); } catch(e){ console.error(e); }
         try { this.wireOrphanRateCard(); } catch(e){ console.error(e); }
         try { this.renderSchemaDriftLog(); } catch(e){ console.error(e); }
@@ -3389,6 +3439,249 @@ ORDER BY total_users DESC`,
                     const text = tr.textContent.toLowerCase();
                     tr.style.display = (schema.includes(val) || table.includes(val) || text.includes(val)) ? '' : 'none';
                 });
+            });
+        }
+    }
+
+    // Schema Drift → Null Regression Matrix
+    renderSchemaNullRegressionMatrix() {
+        const container = document.getElementById('schemaNullRegressionMatrix');
+        const liftTable = document.getElementById('schemaNullLiftTable');
+        if (!container || !liftTable) return;
+
+        // Build day offsets and map
+        const offsets = [-7,-6,-5,-4,-3,-2,-1,0,1,2];
+        const today = new Date();
+
+        // Respect period filter
+        const since = new Date(Date.now() - this.currentDateRange * 86400000);
+
+        // Collapse multiple drifts per column to latest within period; build rows with drift_date and table_fqn
+        const driftRowsRaw = (this.data.schemaDrift || []).map(d => ({
+            CHANGE_TYPE: d.CHANGE_TYPE,
+            TABLE_CATALOG: d.TABLE_CATALOG,
+            TABLE_SCHEMA: d.TABLE_SCHEMA,
+            TABLE_NAME: d.TABLE_NAME,
+            COLUMN_NAME: d.COLUMN_NAME,
+            DETECTED_AT: d.CHANGE_DATE || d.DETECTED_AT || null,
+            SNAP_DATE: d.SNAP_DATE || null
+        })).map(r => ({
+            ...r,
+            TABLE_FQN: `${r.TABLE_CATALOG}.${r.TABLE_SCHEMA}.${String(r.TABLE_NAME).replace(/\s+/g,'_').toUpperCase()}`,
+            DRIFT_DATE: r.DETECTED_AT ? new Date(r.DETECTED_AT) : (r.SNAP_DATE ? new Date(r.SNAP_DATE) : today)
+        })).filter(r => r.DRIFT_DATE >= since)
+          .filter(r => !this.currentDatabase || r.TABLE_CATALOG === this.currentDatabase)
+          .filter(r => !this.currentSchema || r.TABLE_SCHEMA === this.currentSchema);
+
+        const latestByKey = new Map();
+        driftRowsRaw.forEach(r => {
+            const key = `${r.TABLE_FQN}||${r.COLUMN_NAME}`;
+            const prev = latestByKey.get(key);
+            if (!prev || r.DRIFT_DATE > prev.DRIFT_DATE) latestByKey.set(key, r);
+        });
+        const driftRows = Array.from(latestByKey.values());
+        if (driftRows.length === 0) {
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500 text-sm">No schema changes in the selected period.</div>';
+            liftTable.innerHTML = '';
+            return;
+        }
+
+        // Pull null pct time series for window days per (table_fqn, column)
+        const tall = this.data.dataCompletenessTall || [];
+        const cfg = this.data.completenessConfig || [];
+        const fqnToDataset = new Map(cfg.map(x => [x.TABLE_FQN, x.DATASET]));
+
+        const seriesRows = [];
+        const rowStats = [];
+        driftRows.forEach(drift => {
+            const rowKey = `${drift.TABLE_FQN}||${drift.COLUMN_NAME}`;
+            const driftDate = new Date(drift.DRIFT_DATE);
+            const byOffset = new Map();
+            offsets.forEach(off => {
+                const day = new Date(driftDate.getTime() + off * 86400000);
+                const ymd = day.toISOString().split('T')[0];
+                // find closest same-day entry
+                const rec = tall.find(r => r.TABLE_FQN === drift.TABLE_FQN && r.COLUMN_NAME === drift.COLUMN_NAME && new Date(r.AS_OF_DATE).toISOString().split('T')[0] === ymd);
+                byOffset.set(off, rec ? (Number(rec.NULL_PCT) * 100) : null);
+            });
+
+            // Baseline [-7..-1], Post [0..2]
+            const baselineVals = offsets.filter(o => o < 0).map(o => byOffset.get(o)).filter(v => v !== null && Number.isFinite(v));
+            const postVals = offsets.filter(o => o >= 0).map(o => byOffset.get(o)).filter(v => v !== null && Number.isFinite(v));
+            const mean = arr => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
+            const baseline = mean(baselineVals);
+            const post = mean(postVals);
+            const lift = (post !== null && baseline !== null) ? (post - baseline) : null;
+
+            const dataset = fqnToDataset.get(drift.TABLE_FQN) || null;
+            const labelLeft = dataset ? `${dataset} • ` : '';
+            const table = drift.TABLE_NAME;
+            const label = `${labelLeft}${table}.${drift.COLUMN_NAME}`;
+
+            seriesRows.push({
+                key: rowKey,
+                name: label,
+                changeType: drift.CHANGE_TYPE,
+                data: offsets.map(off => ({ x: off, y: byOffset.get(off) }))
+            });
+            rowStats.push({ key: rowKey, name: label, baseline, post, lift, changeType: drift.CHANGE_TYPE });
+        });
+
+        // Keep top 20 by absolute lift
+        const ranked = rowStats
+            .filter(r => r.lift !== null)
+            .sort((a,b) => Math.abs(b.lift) - Math.abs(a.lift))
+            .slice(0, 20);
+        const keepKeys = new Set(ranked.map(r => r.key));
+        const filteredSeries = seriesRows.filter(r => keepKeys.has(r.key));
+
+        // Sort rows by |lift| desc
+        const order = new Map(ranked.map((r, idx) => [r.key, idx]));
+        filteredSeries.sort((a,b) => (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0));
+
+        // Diverging color scale centered on baseline mean (global approximation)
+        const globalBaseline = (() => {
+            const vals = ranked.map(r => r.baseline).filter(v => v !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+        })();
+
+        // Build Apex series as heatmap rows
+        const apexSeries = filteredSeries.map(row => ({
+            name: row.name,
+            data: row.data.map(d => ({ x: d.x, y: d.y }))
+        }));
+
+        // Cleanup any existing chart
+        if (this.charts.schemaNullHeatmap) {
+            try { this.charts.schemaNullHeatmap.destroy(); } catch(e){}
+        }
+
+        // Custom color function to diverge around globalBaseline
+        const colorFn = (value) => {
+            if (value === null || !Number.isFinite(value)) return '#e5e7eb';
+            const v = value;
+            const center = globalBaseline;
+            const delta = v - center;
+            // Map delta to -1..1 roughly over ±15pp
+            const scale = Math.max(-1, Math.min(1, delta / 15));
+            const warm = { r: 234, g: 88, b: 12 };   // orange-600
+            const cool = { r: 37, g: 99, b: 235 };   // blue-600
+            const mid = { r: 203, g: 213, b: 225 };  // slate-300
+            const mix = (a,b,t) => Math.round(a + (b - a) * t);
+            const t = Math.abs(scale);
+            const from = mid, to = scale >= 0 ? warm : cool;
+            const r = mix(from.r, to.r, t), g = mix(from.g, to.g, t), b = mix(from.b, to.b, t);
+            return `rgb(${r},${g},${b})`;
+        };
+
+        // Build discrete color ranges around globalBaseline
+        const b = Math.max(0, Math.min(100, globalBaseline));
+        const ranges = [
+            { from: 0, to: Math.max(0, Math.floor(b - 12)), color: '#93c5fd', name: 'Below' },
+            { from: Math.max(0, Math.floor(b - 12))+0.001, to: Math.max(0, Math.floor(b - 4)), color: '#60a5fa', name: 'Slightly Below' },
+            { from: Math.max(0, Math.floor(b - 4))+0.001, to: Math.min(100, Math.ceil(b + 4)), color: '#cbd5e1', name: 'Baseline' },
+            { from: Math.min(100, Math.ceil(b + 4))+0.001, to: Math.min(100, Math.ceil(b + 12)), color: '#fb923c', name: 'Slightly Above' },
+            { from: Math.min(100, Math.ceil(b + 12))+0.001, to: 100, color: '#ea580c', name: 'Above' }
+        ];
+
+        // Render heatmap
+        const chart = new ApexCharts(container, {
+            series: apexSeries,
+            chart: { 
+                type: 'heatmap', 
+                height: 380, 
+                fontFamily: 'Inter, sans-serif', 
+                toolbar: { show: false },
+                offsetX: 0,
+                offsetY: 0
+            },
+            plotOptions: {
+                heatmap: {
+                    shadeIntensity: 0.5,
+                    colorScale: { ranges }
+                }
+            },
+            xaxis: {
+                categories: offsets,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } },
+                title: { text: 'Days from drift', style: { color: '#6b7280' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '10px' } }
+            },
+            dataLabels: { enabled: false },
+            grid: { padding: { left: 40, right: 0 } },
+            legend: { show: false },
+            tooltip: {
+                custom: ({ seriesIndex, dataPointIndex, w }) => {
+                    const rowKey = filteredSeries[seriesIndex]?.key;
+                    const stats = ranked.find(r => r.key === rowKey);
+                    const off = offsets[dataPointIndex];
+                    const base = stats?.baseline;
+                    const post = stats?.post;
+                    const lift = stats?.lift;
+                    const y = w.globals.series[seriesIndex][dataPointIndex];
+                    // approximate date label: drift_date + off
+                    const drift = driftRows.find(d => `${d.TABLE_FQN}||${d.COLUMN_NAME}` === rowKey)?.DRIFT_DATE || today;
+                    const date = new Date(new Date(drift).getTime() + off * 86400000);
+                    const fmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)}%`;
+                    const liftFmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${(v>=0?'+':'')}${v.toFixed(1)} pp`;
+                    return `<div class="px-3 py-2 bg-white border rounded shadow-lg">
+                        <div class="font-semibold">${filteredSeries[seriesIndex]?.name || ''}</div>
+                        <div class="text-xs text-gray-500">${date.toLocaleDateString()} (d${off>=0?'+':''}${off})</div>
+                        <div class="text-sm">Null %: ${fmt(y)}</div>
+                        <div class="text-xs text-gray-600">Baseline: ${fmt(base)} • Post: ${fmt(post)} • Lift: ${liftFmt(lift)}</div>
+                    </div>`;
+                }
+            }
+        });
+        chart.render();
+        this.charts.schemaNullHeatmap = chart;
+
+        // Lift table (formatted like Top Slowest Domo Connector Runs)
+        const rowsHtml = ranked.map(r => {
+            const warm = r.lift !== null && r.lift > 0;
+            const badgeCls = r.changeType==='ADDED' ? 'bg-green-100 text-green-800' : r.changeType==='REMOVED' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
+            const colorCls = warm ? 'text-orange-600' : 'text-blue-600';
+            const fmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)}%`;
+            const liftFmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${(v>=0?'+':'')}${v.toFixed(1)} pp`;
+            return `<tr class="hover:bg-gray-50 cursor-pointer" data-key="${r.key}">
+                <td class="px-3 py-2 text-sm text-gray-900">
+                    <span class="px-2 py-1 mr-2 rounded-full text-xs ${badgeCls}">${r.changeType}</span>
+                    ${r.name}
+                </td>
+                <td class="px-3 py-2 text-sm font-mono ${colorCls} text-right">${liftFmt(r.lift)}</td>
+                <td class="px-3 py-2 text-sm text-right">${fmt(r.baseline)}</td>
+                <td class="px-3 py-2 text-sm text-right">${fmt(r.post)}</td>
+            </tr>`;
+        }).join('');
+        liftTable.innerHTML = `<div class="overflow-auto h-full"><table class="min-w-full">
+            <thead class="bg-gray-50 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Column</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lift (pp)</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Baseline</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Post</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">${rowsHtml}</tbody>
+          </table></div>`;
+
+        // Click row to filter heatmap to that column (toggle)
+        const tbody = liftTable.querySelector('tbody');
+        if (tbody) {
+            tbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr');
+                if (!tr) return;
+                const key = tr.getAttribute('data-key');
+                const isActive = tr.classList.contains('bg-blue-50');
+                tbody.querySelectorAll('tr').forEach(x => x.classList.remove('bg-blue-50'));
+                let newSeries = apexSeries;
+                if (!isActive) {
+                    tr.classList.add('bg-blue-50');
+                    newSeries = apexSeries.filter((s, idx) => filteredSeries[idx].key === key);
+                }
+                chart.updateSeries(newSeries, true);
             });
         }
     }
