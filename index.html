@@ -950,19 +950,6 @@ WHERE dc.AS_OF_DATE >= :start_date</pre>
                         </div>
                     </div>
 
-                    <!-- Coverage Anomalies (1x1) -->
-                    <div class="grid grid-cols-1 lg:grid-cols-1 gap-8">
-                        <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
-                                <h3 class="text-lg font-semibold text-gray-900">Coverage Anomalies</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Row count anomalies by dataset</span>
-                                </div>
-                            </div>
-                            <div id="coverageAnomaliesChart" class="h-80"></div>
-                        </div>
-                    </div>
-
                     <!-- Schema Drift → Null Regression Matrix (full width) -->
                     <div class="chart-card">
                         <div class="chart-header">
@@ -979,6 +966,19 @@ WHERE dc.AS_OF_DATE >= :start_date</pre>
                             <div class="chart-desc">Ranked table of columns with the largest percentage‑point lift in null rate versus the pre‑drift baseline. Baseline and post windows reflect means over the selected period. Click a row to focus the matrix above on the matching column.</div>
                         </div>
                         <div id="schemaNullLiftTable" class="h-80 overflow-auto"></div>
+                    </div>
+
+                    <!-- Coverage Anomalies (1x1) -->
+                    <div class="grid grid-cols-1 lg:grid-cols-1 gap-8">
+                        <div class="chart-card">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-lg font-semibold text-gray-900">Coverage Anomalies</h3>
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500">Row count anomalies by dataset</span>
+                                </div>
+                            </div>
+                            <div id="coverageAnomaliesChart" class="h-80"></div>
+                        </div>
                     </div>
 
                     <!-- Null Rates & PK Duplicates (1x1) -->
