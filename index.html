@@ -832,7 +832,7 @@ WHERE period = :current_period</pre>
                 <!-- Data Quality Tab -->
                 <div id="tab-quality" class="tab-content p-8 space-y-8">
                     <!-- KPI Cards Row -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                         <div class="metric-card" data-tooltip="Percentage of datasets with complete data">
                             <div class="metric-front">
                                 <div class="flex items-center justify-between">
@@ -920,20 +920,38 @@ FROM OBS_DATA_CONSISTENCY
 WHERE AS_OF_DATE >= :start_date</pre>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Orphan Rate and Coverage Anomalies (1x2) -->
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
-                                <h3 class="text-lg font-semibold text-gray-900">Orphan Rate by Check</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Referential integrity issues</span>
+                        <!-- Orphan Rate (%) hero with popout details -->
+                        <div id="orphanRateCard" class="metric-card no-flip details-affordance cursor-pointer" data-tooltip="Orphan rows as a percentage of total rows over the selected period">
+                            <div class="metric-front">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <p class="text-sm text-gray-600 font-medium">Orphan Rate</p>
+                                            <button id="orphanDetailsToggle" class="text-[7px] leading-none text-white px-1.5 py-0.5 bg-orange-500 hover:bg-orange-600 rounded shadow-sm transition-colors">Details <span class="inline-block ml-0.5">▾</span></button>
+                                        </div>
+                                        <p class="text-3xl font-bold text-gray-900 mt-2" id="orphanRatePct">0.0%</p>
+                                        <p class="text-sm mt-1" id="orphanRateStatus">—</p>
+                                    </div>
+                                    <div class="p-3 bg-orange-100 rounded-xl">
+                                        <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                    </div>
                                 </div>
                             </div>
-                            <div id="orphanRateBar" class="h-80"></div>
+                            <div class="metric-back">
+<pre class="text-xs text-gray-600 font-mono">SELECT SUM(ORPHAN_ROWS) * 100.0 / NULLIF(SUM(ROW_COUNT),0) AS orphan_rate_pct
+FROM OBS_DATA_CONSISTENCY dc
+JOIN OBS_DATA_COMPLETENESS dcmp USING (DATASET)
+WHERE dc.AS_OF_DATE >= :start_date</pre>
+                            </div>
+                            <!-- Bottom popout container -->
+                            <div id="orphanRatePopout" class="hidden stale-popout"></div>
                         </div>
+                    </div>
 
+                    <!-- Coverage Anomalies (1x1) -->
+                    <div class="grid grid-cols-1 lg:grid-cols-1 gap-8">
                         <div class="chart-card">
                             <div class="flex items-center justify-between mb-6">
                                 <h3 class="text-lg font-semibold text-gray-900">Coverage Anomalies</h3>

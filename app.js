@@ -3119,7 +3119,7 @@ ORDER BY total_users DESC`,
     renderQualityCharts() {
         try { this.renderCoverageAnomaliesChart(); } catch(e){ console.error(e); }
         try { this.renderNullsAndDupesTable(); } catch(e){ console.error(e); }
-        try { this.renderOrphanRateBar(); } catch(e){ console.error(e); }
+        try { this.wireOrphanRateCard(); } catch(e){ console.error(e); }
         try { this.renderSchemaDriftLog(); } catch(e){ console.error(e); }
     }
 
@@ -3286,6 +3286,74 @@ ORDER BY total_users DESC`,
         });
         chart.render();
         this.charts.orphanRateBar = chart;
+    }
+
+    wireOrphanRateCard() {
+        const card = document.getElementById('orphanRateCard');
+        const popout = document.getElementById('orphanRatePopout');
+        if (!card || !popout) return;
+
+        const since = new Date(Date.now() - this.currentDateRange * 24 * 60 * 60 * 1000);
+        const consistencyRows = (this.data.dataConsistency || []).filter(r => new Date(r.AS_OF_DATE) >= since);
+        const completenessRows = (this.data.dataCompleteness || []).filter(r => true);
+
+        const totalOrphans = consistencyRows.reduce((s, r) => s + (r.ORPHAN_ROWS || 0), 0);
+        const totalRows = completenessRows.reduce((s, r) => s + (r.ROW_COUNT || 0), 0) || 0;
+        const pct = totalRows > 0 ? (totalOrphans * 100) / totalRows : 0;
+
+        const pctEl = document.getElementById('orphanRatePct');
+        const statusEl = document.getElementById('orphanRateStatus');
+        if (pctEl) pctEl.textContent = `${pct.toFixed(2)}%`;
+
+        let status = 'Healthy';
+        let statusClass = 'text-green-600';
+        if (pct >= 5 && pct < 10) { status = 'Elevated'; statusClass = 'text-orange-600'; }
+        if (pct >= 10) { status = 'Critical'; statusClass = 'text-red-600'; }
+        if (statusEl) { statusEl.textContent = status; statusEl.className = `text-sm ${statusClass}`; }
+
+        const checks = [...consistencyRows]
+            .sort((a,b) => (b.ORPHAN_ROWS||0) - (a.ORPHAN_ROWS||0))
+            .slice(0, 10);
+
+        const rowsHtml = checks.length === 0
+            ? '<div class="text-xs text-gray-500">No orphaned rows in the selected period.</div>'
+            : `<div class="overflow-auto">
+                <table class="min-w-full">
+                  <thead>
+                    <tr class="border-b border-gray-200">
+                       <th class="text-left py-1 px-2 text-xs text-gray-600">Check</th>
+                       <th class="text-right py-1 px-2 text-xs text-gray-600">Orphan Rows</th>
+                       <th class="text-left py-1 px-2 text-xs text-gray-600">As Of</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100">
+                    ${checks.map(r => `<tr>
+                        <td class="py-1 px-2 text-xs text-gray-900">${(r.CHECK_NAME||r.CHECK||'—').replace('FK_','')}</td>
+                        <td class="py-1 px-2 text-xs text-gray-900 text-right">${(r.ORPHAN_ROWS||0).toLocaleString()}</td>
+                        <td class="py-1 px-2 text-xs text-gray-600">${new Date(r.AS_OF_DATE).toLocaleDateString()}</td>
+                    </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>`;
+
+        popout.innerHTML = rowsHtml;
+
+        const toggleBtn = document.getElementById('orphanDetailsToggle');
+        const toggle = () => {
+            const wasHidden = popout.classList.contains('hidden');
+            popout.classList.toggle('hidden', !wasHidden);
+            // When opening (was hidden), raise card's stacking
+            if (wasHidden) {
+                card.style.zIndex = '1000015';
+            } else {
+                card.style.zIndex = '';
+            }
+        };
+        if (toggleBtn) toggleBtn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+        card.addEventListener('click', (e) => {
+            if (e.target && e.target.closest('#orphanDetailsToggle')) return;
+            toggle();
+        });
     }
 
     renderSchemaDriftLog() {

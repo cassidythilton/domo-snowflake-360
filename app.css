@@ -259,7 +259,7 @@ body {
 .metric-card {
     background: white;
     border-radius: 12px;
-    padding: 24px;
+    padding: 20px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
     border: 1px solid #e5e7eb;
     position: relative;
@@ -278,6 +278,11 @@ body {
 .metric-card.compact .text-3xl {
     font-size: 1.5rem;
 }
+
+/* Uniform compact hero sizing for Data Quality row */
+#tab-quality .metric-card .text-3xl { font-size: 1.875rem; }
+#tab-quality .metric-card .text-sm { font-size: 12px; }
+#tab-quality .metric-card .p-3 > svg { width: 20px; height: 20px; }
 
 .metric-card.compact .text-sm {
     font-size: 0.875rem; /* 14px instead of 12px */
@@ -1076,6 +1081,12 @@ body {
     z-index: 1000000;
 }
 
+/* Ensure Orphan Rate card stacks above neighbors when its details are shown */
+#orphanRateCard {
+    position: relative;
+    z-index: 2147483000; /* ensure this card sits above subsequent sections */
+}
+
 .metric-back pre {
     white-space: pre-wrap;
     font-size: 11px;
@@ -1315,8 +1326,14 @@ table tbody tr:hover {
     padding: 10px;
     max-height: 220px;
     overflow: auto;
-    z-index: 1000001; /* ensure above charts and neighboring cards */
-    font-size: 12px; /* slightly smaller, elegant */
+    z-index: 1000005; /* ensure above charts and neighboring cards */
+    font-size: 11px; /* slightly smaller so more details fit */
+}
+
+/* Specific overrides for Orphan Rate details popout */
+#orphanRatePopout {
+    z-index: 2147483001; /* higher than card and any charts */
+    font-size: 11px;   /* compact text for visibility */
 }
 
 .stale-popout::before {
