@@ -5,6 +5,78 @@
 .btn-secondary:hover { background: var(--gray-50); }
 .input { border:1px solid var(--gray-300); border-radius:.375rem; padding:.5rem .75rem; }
 .input:focus { outline:none; box-shadow:0 0 0 2px rgba(37,158,220,.25); border-color:#259EDC; }
+.select-control { position: relative; display: inline-block; }
+.select-modern {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: #ffffff;
+    border: 1px solid var(--gray-300);
+    border-radius: 12px;
+    padding: 10px 36px 10px 14px;
+    font-size: 16px;
+    color: var(--gray-900);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.select-modern:hover { border-color: var(--gray-400); }
+.select-modern:focus { outline: none; border-color: var(--brand-500); box-shadow: 0 0 0 3px rgba(37, 158, 220, 0.25); }
+.select-modern:disabled { background-color: var(--gray-100); color: var(--gray-500); }
+.select-control::after {
+    content: '';
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%236b7280"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>');
+    background-size: 12px 12px;
+    background-repeat: no-repeat;
+    opacity: 0.85;
+}
+
+[data-theme="dark"] .select-modern { background-color: #1a1d29; color: var(--gray-100); border-color: #2d3748; }
+[data-theme="dark"] .select-modern:hover { border-color: #4a5568; }
+[data-theme="dark"] .select-control::after { filter: invert(0.8); }
+
+/* Custom Combobox (enhanced dropdown with search) */
+.combo { position: relative; display: inline-block; min-width: 160px; max-width: 220px; width: auto; }
+.combo-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; background: #fff; color: var(--gray-900);
+    border: 1px solid var(--gray-300); border-radius: 8px; padding: 6px 8px;
+    font-size: 13px; box-shadow: 0 1px 2px rgba(16,24,40,.05);
+}
+.combo-toggle:focus { outline: none; border-color: var(--brand-500); box-shadow: 0 0 0 3px rgba(37,158,220,.25); }
+.combo-chevron { width: 10px; height: 10px; color: var(--gray-500); transition: transform .15s ease; }
+.combo[aria-expanded="true"] .combo-chevron { transform: rotate(180deg); }
+.combo-panel {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: none;
+    width: max(220px, 100%); background: #fff; border: 1px solid var(--gray-200); border-radius: 10px;
+    box-shadow: 0 16px 32px rgba(2, 6, 23, 0.18);
+}
+.combo[aria-expanded="true"] .combo-panel { display: block; }
+.combo-search { width: 100%; border: none; border-bottom: 1px solid var(--gray-200); padding: 6px 8px; border-radius: 8px 8px 0 0; font-size: 12px; }
+.combo-search:focus { outline: none; }
+.combo-list { max-height: 220px; overflow: auto; padding: 4px 0; }
+.combo-option { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; cursor: pointer; font-size: 13px; }
+.combo-option:hover, .combo-option[aria-selected="true"] { background: #f3f4f6; }
+.combo-check { width: 16px; height: 16px; color: var(--brand-600); opacity: 0; }
+.combo-option[aria-selected="true"] .combo-check { opacity: 1; }
+
+[data-theme="dark"] .combo-toggle { background: #1a1d29; color: var(--gray-100); border-color: #2d3748; }
+[data-theme="dark"] .combo-panel { background: #1a1d29; border-color: #2d3748; }
+[data-theme="dark"] .combo-option:hover, [data-theme="dark"] .combo-option[aria-selected="true"] { background: #2d3340; }
+
+/* Compact refresh button to match smaller controls */
+#refreshBtn {
+    padding: 6px 10px !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    line-height: 1.2;
+}
+#refreshBtn svg { width: 12px !important; height: 12px !important; }
 .sidebar-collapsed { width: 0; padding: 0; overflow: hidden; }
 .spinner { border: 2px solid #e5e7eb; border-top-color: #259EDC; border-radius: 50%; width: 14px; height: 14px; animation: spin 1s linear infinite; display:inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -210,6 +282,9 @@ body {
 .metric-card.compact .text-sm {
     font-size: 0.875rem; /* 14px instead of 12px */
 }
+
+/* Global subheader under page title */
+.page-subtitle { font-size: 12px; }
 
 /* Compact Query Optimization Styles - Improved Readability */
 .query-comparison-container {
@@ -1019,6 +1094,28 @@ body {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Harmonized chart header layout (title left, description right) */
+.chart-header {
+    display: flex;
+    align-items: flex-start; /* match Bytes Ingested card */
+    justify-content: space-between;
+    margin-bottom: 24px;
+    gap: 12px;
+}
+.chart-header .chart-desc {
+    margin-left: 16px;
+    max-width: 28rem; /* similar to max-w-md */
+    text-align: right;
+    line-height: 1.4;
+    color: #6b7280;
+    font-size: 11px;
+}
+
+@media (max-width: 768px) {
+    .chart-header { flex-direction: column; align-items: stretch; }
+    .chart-header .chart-desc { text-align: left; margin-left: 0; max-width: 100%; }
+}
+
 .chart-card:hover {
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     border-color: var(--brand-200);
@@ -1051,6 +1148,73 @@ table tbody tr {
 table tbody tr:hover {
     background-color: var(--gray-50);
 }
+
+/* Utilities for modernized slow runs table */
+.num-tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+}
+.num-right {
+    text-align: right;
+}
+.t-compact th, .t-compact td {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+}
+.zebra-light tbody tr:nth-child(odd), .zebra-light > li:nth-child(odd) {
+    background-color: rgba(17, 24, 39, 0.02);
+}
+.header-cell {
+    border-bottom: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 1;
+    cursor: pointer;
+}
+.sort-icon { margin-left: 4px; color: #9ca3af; }
+.focus-ring:focus {
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 3px rgba(37, 158, 220, 0.45);
+    border-radius: 6px;
+}
+.duration-bar {
+    width: 120px;
+    height: 6px;
+    border-radius: 4px;
+    background: #f3f4f6;
+    overflow: hidden;
+}
+.duration-bar > div {
+    height: 100%;
+}
+.duration-bar.bar-neutral > div { background: #cbd5e1; }
+.duration-bar.bar-warn > div { background: #f59e0b; }
+.chip {
+    background: #f9fafb;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+    border-radius: 9999px;
+    padding: 1px 6px; /* pill */
+    line-height: 1.2;
+}
+
+/* Extra-small chip variant for compact summary pills */
+.chip-xs {
+    font-size: 8px !important; /* force compact size */
+    padding: 0 3px;
+}
+
+/* Ensure inner numeric spans inherit size inside compact chips */
+.chip-xs .num-tabular {
+    font-size: inherit !important;
+}
+
+/* Compact rows and header heights for slow runs table */
+.t-compact thead th { padding-top: 6px; padding-bottom: 6px; }
+.t-compact tbody td { padding-top: 8px; padding-bottom: 8px; }
 
 /* Status Badges */
 .status-success {
@@ -1538,6 +1702,10 @@ table tbody tr:hover {
     .performance-comparison {
         grid-template-columns: 1fr;
     }
+
+    /* Make comboboxes responsive */
+    .combo { min-width: 0; width: 100%; max-width: 100%; }
+    .combo-panel { width: 100%; }
 }
 
 /* Custom Scrollbar */

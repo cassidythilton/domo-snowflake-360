@@ -100,48 +100,84 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <h2 id="pageTitle" class="text-2xl font-bold text-gray-900">Cost &amp; Credits</h2>
-                        <p class="text-sm text-gray-600 mt-1">Monitor spend patterns and resource utilization</p>
+                        <p class="text-xs text-gray-600 mt-1">Monitor spend patterns and resource utilization</p>
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="flex items-center space-x-4">
                             <div class="flex items-center space-x-2">
                                 <label class="text-sm font-medium text-gray-700">Period:</label>
-                                <select id="dateRange" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                                    <option value="30">Last 30 days</option>
-                                    <option value="60">Last 60 days</option>
-                                    <option value="90">Last 90 days</option>
-                                    <option value="180">Last 180 days</option>
-                                </select>
+                                <div class="combo" id="periodCombo" aria-expanded="false">
+                                    <button type="button" class="combo-toggle" aria-haspopup="listbox" aria-labelledby="periodComboLabel">
+                                        <span id="periodComboLabel">Last 30 days</span>
+                                        <svg class="combo-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                    <div class="combo-panel">
+                                        <input type="text" class="combo-search" id="periodSearch" placeholder="Search period" aria-label="Search period" />
+                                        <ul class="combo-list" role="listbox" id="periodOptions">
+                                            <li role="option" class="combo-option" data-value="30" aria-selected="true">Last 30 days <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="60">Last 60 days <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="90">Last 90 days <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="180">Last 180 days <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                             <div class="flex items-center space-x-2">
                                 <label class="text-sm font-medium text-gray-700">Warehouse:</label>
-                                <select id="warehouseFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                                    <option value="">All Warehouses</option>
-                                    <option value="COMPUTE_WH">COMPUTE_WH</option>
-                                    <option value="ANALYTICS_WH">ANALYTICS_WH</option>
-                                    <option value="ETL_WH">ETL_WH</option>
-                                    <option value="REPORTING_WH">REPORTING_WH</option>
-                                </select>
+                                <div class="combo" id="whCombo" aria-expanded="false">
+                                    <button type="button" class="combo-toggle" aria-haspopup="listbox" aria-labelledby="whComboLabel">
+                                        <span id="whComboLabel">All Warehouses</span>
+                                        <svg class="combo-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                    <div class="combo-panel">
+                                        <input type="text" class="combo-search" id="whSearch" placeholder="Search warehouses" aria-label="Search warehouses" />
+                                        <ul class="combo-list" role="listbox" id="whOptions">
+                                            <li role="option" class="combo-option" data-value="" aria-selected="true">All Warehouses <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="COMPUTE_WH">COMPUTE_WH <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="ANALYTICS_WH">ANALYTICS_WH <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="ETL_WH">ETL_WH <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="REPORTING_WH">REPORTING_WH <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                             <div class="flex items-center space-x-2">
                                 <label class="text-sm font-medium text-gray-700">Database:</label>
-                                <select id="databaseFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                                    <option value="">All Databases</option>
-                                    <option value="PROD_DB">PROD_DB</option>
-                                    <option value="ANALYTICS_DB">ANALYTICS_DB</option>
-                                    <option value="STAGING_DB">STAGING_DB</option>
-                                    <option value="DEV_DB">DEV_DB</option>
-                                </select>
+                                <div class="combo" id="dbCombo" aria-expanded="false">
+                                    <button type="button" class="combo-toggle" aria-haspopup="listbox" aria-labelledby="dbComboLabel">
+                                        <span id="dbComboLabel">All Databases</span>
+                                        <svg class="combo-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                    <div class="combo-panel">
+                                        <input type="text" class="combo-search" id="dbSearch" placeholder="Search databases" aria-label="Search databases" />
+                                        <ul class="combo-list" role="listbox" id="dbOptions">
+                                            <li role="option" class="combo-option" data-value="" aria-selected="true">All Databases <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="PROD_DB">PROD_DB <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="ANALYTICS_DB">ANALYTICS_DB <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="STAGING_DB">STAGING_DB <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="DEV_DB">DEV_DB <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                             <div class="flex items-center space-x-2">
                                 <label class="text-sm font-medium text-gray-700">Schema:</label>
-                                <select id="schemaFilter" class="text-sm border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                                    <option value="">All Schemas</option>
-                                    <option value="PUBLIC">PUBLIC</option>
-                                    <option value="RAW">RAW</option>
-                                    <option value="TRANSFORMED">TRANSFORMED</option>
-                                    <option value="MARTS">MARTS</option>
-                                </select>
+                                <div class="combo" id="schemaCombo" aria-expanded="false">
+                                    <button type="button" class="combo-toggle" aria-haspopup="listbox" aria-labelledby="schemaComboLabel">
+                                        <span id="schemaComboLabel">All Schemas</span>
+                                        <svg class="combo-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                    <div class="combo-panel">
+                                        <input type="text" class="combo-search" id="schemaSearch" placeholder="Search schemas" aria-label="Search schemas" />
+                                        <ul class="combo-list" role="listbox" id="schemaOptions">
+                                            <li role="option" class="combo-option" data-value="" aria-selected="true">All Schemas <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="PUBLIC">PUBLIC <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="RAW">RAW <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="TRANSFORMED">TRANSFORMED <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                            <li role="option" class="combo-option" data-value="MARTS">MARTS <svg class="combo-check" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.415 0l-3-3a1 1 0 111.415-1.414L8.5 12.086l6.793-6.793a1 1 0 011.411-.003z" clip-rule="evenodd"/></svg></li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <button id="refreshBtn" class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors flex items-center space-x-2">
@@ -258,10 +294,10 @@ WHERE ACTIVE_PCT &gt; 0</pre>
 
                     <!-- Full Width Chart -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="chart-header">
                             <h3 class="text-lg font-semibold text-gray-900">Credits and Cost Over Time</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Daily trend analysis</span>
+                            <div class="chart-desc">
+                                Tracks daily Snowflake credits consumed alongside USD cost. Use the twin axes to spot periods where cost rises faster than credits, indicating price or workload changes. Hover to inspect specific dates and compare week‑over‑week movement.
                             </div>
                         </div>
                         <div id="creditsAndCostChart" class="h-80"></div>
@@ -270,11 +306,17 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                     <!-- Two Column Layout for Supporting Charts -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Cost Distribution</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Warehouse Cost Distribution</h3>
+                                <div class="chart-desc">Treemap groups warehouse spend to reveal the largest cost contributors. Size encodes total cost while color highlights relative intensity. Use this to pinpoint candidates for scheduling or right‑sizing.</div>
+                            </div>
                             <div id="warehouseTreemap" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Utilization</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Warehouse Utilization</h3>
+                                <div class="chart-desc">Summarizes average running vs queued load to assess resource pressure. Aim for steady utilization without persistent queuing; sustained high queued load suggests resizing or concurrency tuning.</div>
+                            </div>
                             <div id="utilizationChart" class="h-80"></div>
                         </div>
                     </div>
@@ -282,20 +324,16 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                     <!-- Cost Efficiency Analysis -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
+                            <div class="chart-header">
                                 <h3 class="text-lg font-semibold text-gray-900">Cost per Successful Row</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Efficiency trend over time</span>
-                                </div>
+                                <div class="chart-desc">Shows normalized cost per successfully loaded row across time. A downward trend reflects efficiency gains; spikes often indicate large loads with low throughput or costly transforms.</div>
                             </div>
                             <div id="costPerRowLine" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
+                            <div class="chart-header">
                                 <h3 class="text-lg font-semibold text-gray-900">Daily Credits by Service Type</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Service breakdown</span>
-                                </div>
+                                <div class="chart-desc">Stacked area reveals which Snowflake services drive credit consumption each day. Watch for mix shifts (e.g., AI Services increasing) that change cost profile and may require policy or scheduling adjustments.</div>
                             </div>
                             <div id="creditsChart" class="h-80"></div>
                         </div>
@@ -303,7 +341,10 @@ WHERE ACTIVE_PCT &gt; 0</pre>
 
                     <!-- Full Width Table -->
                     <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 10 Domo Datasets by Cost</h3>
+                        <div class="chart-header">
+                            <h3 class="text-lg font-semibold text-gray-900">Top 10 Domo Datasets by Cost</h3>
+                            <div class="chart-desc">Ranks datasets by total USD spend over the selected period. Use the trend column to see momentum and validate whether high‑cost assets are delivering value or need optimization.</div>
+                        </div>
                         <div class="overflow-x-auto">
                             <table class="min-w-full" id="datasetCostTable">
                                 <thead>
@@ -441,24 +482,18 @@ WHERE ACTIVE_PCT &gt; 0</pre>
 
                     <!-- Full Width Charts -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="chart-header">
                             <h3 class="text-lg font-semibold text-gray-900">P95 Query Duration Trend</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                    SLA: 1.0s
-                                </span>
-                            </div>
+                            <div class="chart-desc">Shows the 95th percentile of query execution times per day. Use the SLA badge as a reference line; sustained values above the SLA indicate workload or configuration issues worth investigating.</div>
                         </div>
                         <div id="queryPerformanceChart" class="h-80"></div>
                     </div>
 
                     <!-- Throughput Trend Evolution -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="chart-header">
                             <h3 class="text-lg font-semibold text-gray-900">Throughput Trend Evolution</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Rows/sec & Bytes/sec over time</span>
-                            </div>
+                            <div class="chart-desc">Tracks ingestion throughput over time using rows/sec and bytes/sec. Look for plateaus or dips that coincide with pipeline or warehouse changes; rising bytes with flat rows can indicate larger payloads per row.</div>
                         </div>
                         <div id="throughputTrendChart" class="h-80"></div>
                     </div>
@@ -466,11 +501,17 @@ WHERE ACTIVE_PCT &gt; 0</pre>
                     <!-- Failure Rate + Events side-by-side -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Query Failure Rate Trend</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Query Failure Rate Trend</h3>
+                                <div class="chart-desc">Daily percentage of failed queries. Spikes often correlate with upstream schema changes or permission issues; drill into the day to isolate affected warehouses or users.</div>
+                            </div>
                             <div id="failureRateChart" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Warehouse Events Timeline</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Warehouse Events Timeline</h3>
+                                <div class="chart-desc">Scatter plot of key warehouse events (suspend, resume, resize) across time. Align anomalies in performance with operational events to assess impact and tune auto‑suspend or sizing policies.</div>
+                            </div>
                             <div id="warehouseEventsChart" class="h-80"></div>
                         </div>
                     </div>
@@ -592,22 +633,26 @@ WHERE RUN_DATE &gt;= :start_date</pre>
 
                     <!-- End-to-End Latency Heatmap -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="chart-header">
                             <h3 class="text-lg font-semibold text-gray-900">End-to-End Latency Heatmap</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-gray-500">Source → Warehouse latency by dataset</span>
-                            </div>
+                            <div class="chart-desc">Visualizes daily end‑to‑end latency from data source to warehouse for each dataset. Focus on persistent hot spots rather than one‑off spikes; recurring bands suggest SLA or pipeline scheduling issues.</div>
                         </div>
                         <div id="e2eLatencyHeatmap" class="h-80"></div>
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Connector Success Rate</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Connector Success Rate</h3>
+                                <div class="chart-desc">Breakdown of successful vs failed connector runs in the selected period. Use it to validate reliability targets and to decide where retries or alert thresholds should be adjusted.</div>
+                            </div>
                             <div id="connectorSuccessChart" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">SLA Breaches Heatmap</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">SLA Breaches Heatmap</h3>
+                                <div class="chart-desc">Highlights connectors that exceeded runtime SLAs on specific days. Concentrated clusters point to upstream dependency or capacity issues; investigate code changes or coincident warehouse events.</div>
+                            </div>
                             <div id="slaHeatmapChart" class="h-80"></div>
                         </div>
                     </div>
@@ -618,16 +663,17 @@ WHERE RUN_DATE &gt;= :start_date</pre>
                     <div class="grid grid-cols-1 gap-8">
                         <!-- Top Slowest Domo Connector Runs moved here -->
                         <div class="chart-card">
-                            <div class="flex items-center justify-between mb-6">
+                            <div class="chart-header">
                                 <h3 class="text-lg font-semibold text-gray-900">Top Slowest Domo Connector Runs</h3>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm text-gray-500">Longest successful connector executions</span>
-                                </div>
+                                <div class="chart-desc">Table of slowest successful connector executions with duration bars for quick comparison. Sort columns to identify outliers by runtime, throughput, or start time.</div>
                             </div>
                             <div id="slowRunsTable" class="h-80 overflow-auto"></div>
                         </div>
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Data Freshness Status</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Data Freshness Status</h3>
+                                <div class="chart-desc">Shows hours since last successful run for key datasets. Use it to spot late feeds and confirm whether delays are chronic or isolated to a single day.</div>
+                            </div>
                             <div class="overflow-x-auto">
                                 <table class="min-w-full" id="freshnessTable">
                                     <thead>
@@ -742,35 +788,42 @@ WHERE period = :current_period</pre>
                     <!-- Full Width Charts -->
                     <!-- Cost vs Utilization Quadrant Analysis -->
                     <div class="chart-card">
-                        <div class="flex items-center justify-between mb-6">
+                        <div class="chart-header">
                             <h3 class="text-lg font-semibold text-gray-900">Cost vs Utilization</h3>
-                            <div class="flex items-center space-x-2">
-                                <span class="text-gray-500 text-right leading-relaxed" style="font-size: 10px;">
-                                    Quadrant analysis of dataset cost efficiency vs utilization.<br/>
-                                    Bubble size = runs, color = success rate.
-                                </span>
-                            </div>
+                            <div class="chart-desc">Quadrant analysis comparing dataset spend (cost) versus bytes loaded (utilization). Bubble size reflects run volume and color indicates success rate. Use it to find high‑cost/low‑utilization candidates for optimization.</div>
                         </div>
                         <div id="costUtilQuadrantChart" class="h-80"></div>
                     </div>
 
                     <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Top 5 Connectors by Rows Ingested</h3>
+                        <div class="chart-header">
+                            <h3 class="text-lg font-semibold text-gray-900">Top 5 Connectors by Rows Ingested</h3>
+                            <div class="chart-desc">Ranks connectors by total rows ingested in the selected period. Useful for identifying critical pipelines and validating that throughput aligns with business expectations.</div>
+                        </div>
                         <div id="topConnectorsChart" class="h-80"></div>
                     </div>
                     
                     <div class="chart-card">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Weekly Active Users Trend</h3>
+                        <div class="chart-header">
+                            <h3 class="text-lg font-semibold text-gray-900">Weekly Active Users Trend</h3>
+                            <div class="chart-desc">Shows weekly active Snowflake users to measure adoption. Look for steady growth and watch for dips following policy changes or platform incidents.</div>
+                        </div>
                         <div id="wauTrendChart" class="h-80"></div>
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Credits vs Users Correlation</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Credits vs Users Correlation</h3>
+                                <div class="chart-desc">Scatter compares weekly active users to credits consumed. Points above the trend line suggest inefficient credit use; below the line indicates strong efficiency.</div>
+                            </div>
                             <div id="creditsUsersChart" class="h-80"></div>
                         </div>
                         <div class="chart-card">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-6">Dataset Cost Distribution</h3>
+                            <div class="chart-header">
+                                <h3 class="text-lg font-semibold text-gray-900">Dataset Cost Distribution</h3>
+                                <div class="chart-desc">Horizontal bars break down total cost by dataset, sorted high to low. Use to audit top spenders and validate whether investment matches business priority.</div>
+                            </div>
                             <div id="datasetCostChart" class="h-80"></div>
                         </div>
                     </div>

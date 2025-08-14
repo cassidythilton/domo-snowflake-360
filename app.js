@@ -19,6 +19,8 @@ class SnowDomoDashboard {
         this.currentQueryPage = 1;
         // Feature flags
         this.useInlineSwarmPanel = true; // Inline query details in beehive chart
+        // Sort state for Slowest Connector Runs table
+        this.slowRunsSort = { key: 'duration', dir: 'desc' };
         
         // Dataset aliases for live data
         this.datasetAliases = {
@@ -73,6 +75,233 @@ class SnowDomoDashboard {
         modal.classList.add('hidden');
         this.createAlertEditor = null;
         this.pendingAlertDraft = null;
+    }
+
+    // ---------- Helpers: formatting & stats for Slow Runs table ----------
+    formatDurationShort(totalSeconds) {
+        const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        const parts = [];
+        if (days) parts.push(days + 'd');
+        if (hours) parts.push(hours + 'h');
+        if (minutes) parts.push(minutes + 'm');
+        if (!days && !hours) parts.push(secs + 's');
+        return parts.join(' ');
+    }
+
+    formatNumber(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '—';
+        return n.toLocaleString();
+    }
+
+    formatBytesPerSecond(bytesPerSec) {
+        const n = Number(bytesPerSec);
+        if (!Number.isFinite(n) || n <= 0) return '—';
+        const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+        let idx = 0;
+        let val = n;
+        while (val >= 1024 && idx < units.length - 1) {
+            val = val / 1024;
+            idx += 1;
+        }
+        // 1–2 decimals, trim trailing zeros
+        const fixed = (val < 10 ? val.toFixed(2) : val < 100 ? val.toFixed(1) : Math.round(val).toString());
+        const pretty = typeof fixed === 'string' ? fixed.replace(/\.0+$/, '').replace(/(\.[1-9])0$/, '$1') : String(fixed);
+        return `${pretty} ${units[idx]}`;
+    }
+
+    quantile(sortedNumbers, q) {
+        const arr = sortedNumbers.filter(Number.isFinite);
+        const n = arr.length;
+        if (n === 0) return 0;
+        const pos = (n - 1) * q;
+        const base = Math.floor(pos);
+        const rest = pos - base;
+        if (arr[base + 1] !== undefined) {
+            return arr[base] + rest * (arr[base + 1] - arr[base]);
+        } else {
+            return arr[base];
+        }
+    }
+
+    handleHeaderKey(event, key) {
+        if (event && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            this.setSlowRunsSort(key);
+        }
+    }
+
+    setSlowRunsSort(key) {
+        const current = this.slowRunsSort || { key: 'duration', dir: 'desc' };
+        if (current.key === key) {
+            current.dir = current.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            current.key = key;
+            // Default directions: duration desc, rps desc, mbs desc, started desc, dataset asc
+            if (key === 'dataset') current.dir = 'asc';
+            else current.dir = 'desc';
+        }
+        this.slowRunsSort = current;
+        this.renderSlowRunsTableModern();
+    }
+
+    // Build the modernized slow runs table
+    renderSlowRunsTableModern() {
+        try {
+            const container = document.getElementById('slowRunsTable');
+            if (!container) return;
+
+            const runs = (this.data.connectorRuns || [])
+                .filter(run => run && run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
+                .map(run => ({
+                    dataset: run['Data Source Name'] || '—',
+                    started: run['Start Time'] ? new Date(run['Start Time']) : null,
+                    durationSec: Number(run['Run Time Seconds']) || 0,
+                    rowsPerSec: Number(run['Rows Per Second']) || 0,
+                    bytesPerSec: Number(run['Bytes Per Second']) || 0,
+                    raw: run
+                }));
+
+            const sort = this.slowRunsSort || { key: 'duration', dir: 'desc' };
+            const sorted = runs.sort((a, b) => {
+                const dir = sort.dir === 'asc' ? 1 : -1;
+                switch (sort.key) {
+                    case 'dataset':
+                        return dir * String(a.dataset).localeCompare(String(b.dataset));
+                    case 'started':
+                        return dir * (((a.started || 0).valueOf()) - ((b.started || 0).valueOf()));
+                    case 'rps':
+                        return dir * (a.rowsPerSec - b.rowsPerSec);
+                    case 'mbs':
+                        return dir * (a.bytesPerSec - b.bytesPerSec);
+                    case 'duration':
+                    default:
+                        return dir * (a.durationSec - b.durationSec);
+                }
+            });
+
+            const displayed = sorted.slice(0, 15);
+            const durations = displayed.map(r => r.durationSec).filter(Number.isFinite).sort((x, y) => x - y);
+            const rpsValues = displayed.map(r => r.rowsPerSec).filter(Number.isFinite).sort((x, y) => x - y);
+            const p50 = this.quantile(durations, 0.5);
+            const p90 = this.quantile(durations, 0.9);
+            const p95 = this.quantile(durations, 0.95);
+            const medianRps = this.quantile(rpsValues, 0.5);
+
+            // Summary strip
+            const summaryHtml = `
+                <div class="flex items-center gap-1 mb-2 text-gray-700" style="font-size:8px">
+                    <span class="chip chip-xs" style="font-size:8px" title="p50 (median): 50th percentile of durations among displayed runs. Half are faster, half are slower.">p50 Duration: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatDurationShort(p50)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px" title="p95: 95th percentile of durations among displayed runs. 95% complete in this time or less.">p95 Duration: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatDurationShort(p95)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px">Median r/s: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatNumber(medianRps)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px">Rows shown: ${displayed.length}</span>
+                </div>`;
+
+            // ARIA sort states
+            const ariaFor = (key) => (sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+            const sortIcon = (key) => sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : '';
+
+            // Re-render on resize for responsive switch without Tailwind
+            if (!this._slowRunsResizeBound) {
+                this._slowRunsResizeBound = true;
+                window.addEventListener('resize', () => this.renderSlowRunsTableModern());
+            }
+
+            const isMobile = window.innerWidth && window.innerWidth < 768;
+
+            // Desktop table (>=768px)
+            let tableHtml = `
+                <div>
+                    <table class="min-w-full t-compact zebra-light">
+                        <thead class="sticky top-0 bg-white border-b border-gray-200">
+                            <tr>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('dataset')}" onclick="dashboard.setSlowRunsSort('dataset')" onkeydown="dashboard.handleHeaderKey(event,'dataset')">Dataset</th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('started')}" onclick="dashboard.setSlowRunsSort('started')" onkeydown="dashboard.handleHeaderKey(event,'started')">Started <span class="sort-icon">${sortIcon('started')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('duration')}" onclick="dashboard.setSlowRunsSort('duration')" onkeydown="dashboard.handleHeaderKey(event,'duration')">Duration <span class="sort-icon">${sortIcon('duration')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-right text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('rps')}" onclick="dashboard.setSlowRunsSort('rps')" onkeydown="dashboard.handleHeaderKey(event,'rps')">r/s <span class="sort-icon">${sortIcon('rps')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-right text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('mbs')}" onclick="dashboard.setSlowRunsSort('mbs')" onkeydown="dashboard.handleHeaderKey(event,'mbs')">MB/s <span class="sort-icon">${sortIcon('mbs')}</span></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+            `;
+
+            displayed.forEach(row => {
+                const startedText = row.started ? row.started.toLocaleString() : '—';
+                const durationText = this.formatDurationShort(row.durationSec);
+                const durationTooltip = `${row.durationSec} seconds`;
+                const barWidth = p95 > 0 ? Math.min(100, Math.round((row.durationSec / p95) * 100)) : 0;
+                const barClass = row.durationSec >= p90 ? 'bar-warn' : 'bar-neutral';
+                const rpsText = this.formatNumber(row.rowsPerSec);
+                const bpsText = this.formatBytesPerSecond(row.bytesPerSec);
+                const bpsTitle = `${(row.bytesPerSec || 0).toLocaleString()} B/s`;
+
+                tableHtml += `
+                    <tr class="hover:bg-gray-50 focus-ring" tabindex="0">
+                        <td class="px-3 py-2 text-sm text-gray-900">${row.dataset}</td>
+                        <td class="px-3 py-2 text-sm text-gray-600">${startedText}</td>
+                        <td class="px-3 py-2 text-sm text-gray-900">
+                            <div class="flex items-center justify-between gap-3" title="${durationTooltip}">
+                                <span class="font-mono num-tabular">${durationText}</span>
+                                <div class="duration-bar ${barClass}"><div style="width:${barWidth}%;"></div></div>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2 text-sm text-gray-900 num-tabular num-right" title="Rows per second">${rpsText}</td>
+                        <td class="px-3 py-2 text-sm text-gray-900 num-tabular num-right" title="${bpsTitle}">${bpsText}</td>
+                    </tr>
+                `;
+            });
+
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            // Mobile list (<768px)
+            let listHtml = `
+                <div>
+                    <ul class="divide-y divide-gray-100 zebra-light rounded-md">
+            `;
+            displayed.forEach(row => {
+                const startedText = row.started ? row.started.toLocaleString() : '—';
+                const durationText = this.formatDurationShort(row.durationSec);
+                const durationTooltip = `${row.durationSec} seconds`;
+                const barWidth = p95 > 0 ? Math.min(100, Math.round((row.durationSec / p95) * 100)) : 0;
+                const barClass = row.durationSec >= p90 ? 'bar-warn' : 'bar-neutral';
+                const rpsText = this.formatNumber(row.rowsPerSec);
+                const bpsText = this.formatBytesPerSecond(row.bytesPerSec);
+                const bpsTitle = `${(row.bytesPerSec || 0).toLocaleString()} B/s`;
+                listHtml += `
+                    <li class="py-2 px-3 hover:bg-gray-50 focus-ring" tabindex="0">
+                        <div class="flex items-center justify-between text-[14px]">
+                            <div class="font-medium text-gray-900 mr-3 truncate">${row.dataset}</div>
+                            <div class="flex items-center gap-3 text-gray-900" title="${durationTooltip}">
+                                <span class="font-mono num-tabular">${durationText}</span>
+                                <div class="duration-bar ${barClass}"><div style="width:${barWidth}%;"></div></div>
+                            </div>
+                        </div>
+                        <div class="mt-1 text-[12px] text-gray-600 flex items-center gap-2">
+                            <span>${startedText}</span>
+                            <span>•</span>
+                            <span class="font-mono num-tabular" title="Rows per second">${rpsText} r/s</span>
+                            <span>•</span>
+                            <span class="font-mono num-tabular" title="${bpsTitle}">${bpsText}</span>
+                        </div>
+                    </li>
+                `;
+            });
+            listHtml += `</ul></div>`;
+
+            container.innerHTML = isMobile ? (summaryHtml + listHtml) : (summaryHtml + tableHtml);
+        } catch (e) {
+            console.error('Error rendering slow runs table (pipeline):', e);
+            const container = document.getElementById('slowRunsTable');
+            if (container) container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Table unavailable</div>';
+        }
     }
 
     handleCancelCreateAlert() {
@@ -440,11 +669,108 @@ class SnowDomoDashboard {
             this.toggleTheme();
         });
 
-        // Date range change
-        document.getElementById('dateRange').addEventListener('change', (e) => {
-            this.currentDateRange = parseInt(e.target.value);
-            this.refreshData();
-        });
+        // Date range change (legacy select, only if present)
+        const dateRangeSelect = document.getElementById('dateRange');
+        if (dateRangeSelect) {
+            dateRangeSelect.addEventListener('change', (e) => {
+                this.currentDateRange = parseInt(e.target.value);
+                this.refreshData();
+            });
+        }
+
+        // Enhanced Database combobox interactions
+        const dbCombo = document.getElementById('dbCombo');
+        if (dbCombo) {
+            const toggle = dbCombo.querySelector('.combo-toggle');
+            const label = dbCombo.querySelector('#dbComboLabel');
+            const search = dbCombo.querySelector('#dbSearch');
+            const list = dbCombo.querySelector('#dbOptions');
+
+            const setExpanded = (open) => {
+                dbCombo.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) setTimeout(() => search.focus(), 0);
+            };
+
+            toggle.addEventListener('click', () => setExpanded(dbCombo.getAttribute('aria-expanded') !== 'true'));
+
+            document.addEventListener('click', (e) => {
+                if (!dbCombo.contains(e.target)) setExpanded(false);
+            });
+
+            search.addEventListener('input', () => {
+                const q = search.value.toLowerCase();
+                list.querySelectorAll('.combo-option').forEach(li => {
+                    const text = li.textContent.toLowerCase();
+                    li.style.display = text.includes(q) ? '' : 'none';
+                });
+            });
+
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option');
+                if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false'));
+                li.setAttribute('aria-selected', 'true');
+                const value = li.dataset.value || '';
+                label.textContent = li.textContent.trim();
+                this.currentDatabase = value;
+                setExpanded(false);
+                this.refreshData();
+            });
+        }
+
+        // Enhanced Period combobox
+        const pCombo = document.getElementById('periodCombo');
+        if (pCombo) {
+            const toggle = pCombo.querySelector('.combo-toggle');
+            const label = pCombo.querySelector('#periodComboLabel');
+            const search = pCombo.querySelector('#periodSearch');
+            const list = pCombo.querySelector('#periodOptions');
+            const setExpanded = (open) => { pCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(pCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!pCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentDateRange = parseInt(li.dataset.value || '30'); setExpanded(false); this.refreshData();
+            });
+        }
+
+        // Enhanced Warehouse combobox
+        const whCombo = document.getElementById('whCombo');
+        if (whCombo) {
+            const toggle = whCombo.querySelector('.combo-toggle');
+            const label = whCombo.querySelector('#whComboLabel');
+            const search = whCombo.querySelector('#whSearch');
+            const list = whCombo.querySelector('#whOptions');
+            const setExpanded = (open) => { whCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(whCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!whCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentWarehouse = li.dataset.value || ''; setExpanded(false); this.refreshData();
+            });
+        }
+
+        // Enhanced Schema combobox
+        const sCombo = document.getElementById('schemaCombo');
+        if (sCombo) {
+            const toggle = sCombo.querySelector('.combo-toggle');
+            const label = sCombo.querySelector('#schemaComboLabel');
+            const search = sCombo.querySelector('#schemaSearch');
+            const list = sCombo.querySelector('#schemaOptions');
+            const setExpanded = (open) => { sCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(sCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!sCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentSchema = li.dataset.value || ''; setExpanded(false); this.refreshData();
+            });
+        }
 
         // Refresh button
         document.getElementById('refreshBtn').addEventListener('click', () => {
@@ -541,12 +867,48 @@ class SnowDomoDashboard {
     }
 
     generateMockData() {
-        // Seeded dataset names used across charts for Mock mode
-        this.mockDatasets = [
-            'HHS_NPI_Registry','Transaction Fraud Recommendation','Retail Product Catalog','Website Analytics Sessions',
-            'IoT Device Telemetry','Marketing Campaign Attribution','Customer 360 Master','Order Line Items',
-            'Payments Settlement','Support Tickets','Warehouse Inventory','Log Events Aggregated'
+        // Unified dataset name pool used across all mock charts
+        const datasetNamePool = [
+            'LIVESTREAM OPPORTUNITIES',
+            'GOLD LOANS',
+            'GOLD MAINTENANCE REQUESTS',
+            'ACCOUNTS',
+            'RETAIL_HIGH_RISK_CUSTOMER',
+            'DOMO DATASETS | BO',
+            'RAIDAR ACCOUNTS',
+            'TEST250620',
+            'NSW FUEL STATIONS',
+            'AI SERVICES',
+            'WEATHER_COLLECTION__APP_DB',
+            'SALESFORCE.ACCOUNTS.WILDCAT',
+            'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA',
+            'MANUFACTURING_INVENTORY_NEW',
+            'AI CHAT SESSIONS',
+            'PROMOGENIE_RESULTS_CLAUDECODE.CSV',
+            'SNOWFLAKE.SALESFORCE.CONTACT.COBRA',
+            'WEATHER FORECAST',
+            'CURRENCY_250620',
+            'SEMINAR TABLE',
+            'OPPORTUNITY TEST',
+            'GOLD PROPERTIES WITH PAYMENTS',
+            'DOMOSTATS | DATAFLOW HISTORY',
+            'ATM - TRANSACTION FRAUD RECOMMENDATIONS',
+            'DEMO',
+            'SF_OPORTUNIDADES',
+            'CONTACTS',
+            'NSW FUEL PRICES',
+            'REVELIO | REVELIO_DOMO_POSTINGS_UNIFIED_DYNAMICS2_LATEST',
+            'HHS_NPI_REGISTRY'
         ];
+        const pickUnique = (n) => {
+            const arr = [...datasetNamePool];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr.slice(0, Math.min(n, arr.length));
+        };
+        this.mockDatasets = [...datasetNamePool];
         const endDate = new Date();
         const startDate = new Date(endDate.getTime() - (this.currentDateRange * 24 * 60 * 60 * 1000));
         // Generate date array
@@ -558,7 +920,7 @@ class SnowDomoDashboard {
         // Data Quality mock datasets
         // Coverage anomalies (ROWS_LOADED with z-score) - more realistic anomaly patterns
         this.data.dataCoverage = [];
-        const dqDatasets = ['USER_ACTIVITY', 'SALES_DATA', 'MARKETING_EVENTS'];
+        const dqDatasets = pickUnique(3);
         dates.forEach((date, dateIndex) => {
             dqDatasets.forEach((ds, dsIndex) => {
                 // Base average varies by dataset
@@ -613,9 +975,9 @@ class SnowDomoDashboard {
         this.data.schemaDrift = Array.from({length:50}).map(() => ({
             CHANGE_DATE: new Date(Date.now()-Math.floor(Math.random()*30)*86400000),
             CHANGE_TYPE: ['ADDED','REMOVED','MODIFIED'][Math.floor(Math.random()*3)],
-            TABLE_CATALOG: 'PRODUCTION',
-            TABLE_SCHEMA: ['SALES','MARKETING','FINANCE','OPERATIONS'][Math.floor(Math.random()*4)],
-            TABLE_NAME: ['CUSTOMERS','ORDERS','PRODUCTS','TRANSACTIONS','USERS'][Math.floor(Math.random()*5)],
+            TABLE_CATALOG: 'DATASETS',
+            TABLE_SCHEMA: 'PUBLIC',
+            TABLE_NAME: this.mockDatasets[Math.floor(Math.random()*this.mockDatasets.length)],
             COLUMN_NAME: ['EMAIL','PHONE','ADDRESS','CREATED_AT','UPDATED_AT','STATUS','AMOUNT'][Math.floor(Math.random()*7)],
             DATA_TYPE: ['VARCHAR(255)','INTEGER','TIMESTAMP','BOOLEAN','DECIMAL(10,2)'][Math.floor(Math.random()*5)]
         })).sort((a,b) => b.CHANGE_DATE - a.CHANGE_DATE);
@@ -711,7 +1073,7 @@ class SnowDomoDashboard {
         });
 
         // OBS_DOMO_CONNECTOR_HEALTH
-        const connectors = ['Raidar Accounts', 'SALESFORCE.ACCOUNTS.WILDCAT', 'rootCauseRecord', 'forecastRecord'];
+        const connectors = this.mockDatasets.slice(0, 6);
         this.data.connectorHealth = [];
         dates.forEach(date => {
             connectors.forEach(connector => {
@@ -726,13 +1088,7 @@ class SnowDomoDashboard {
         });
 
         // OBS_DOMO_DATA_FRESHNESS
-        this.data.dataFreshness = [
-            { DATASET: 'SALESFORCE.ACCOUNTS.WILDCAT', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 48) },
-            { DATASET: 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 24) },
-            { DATASET: 'Raidar Accounts', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 72) },
-            { DATASET: 'forecastRecord', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 400) },
-            { DATASET: 'rootCauseRecord', HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 400) }
-        ];
+        this.data.dataFreshness = this.mockDatasets.slice(0, 6).map(n => ({ DATASET: n, HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 72) }));
 
         // OBS_RECORD_FRESHNESS (per-day source → warehouse lag by dataset)
         const freshnessDatasets = this.data.dataFreshness.map(d => d.DATASET);
@@ -753,26 +1109,14 @@ class SnowDomoDashboard {
 
 
         // OBS_DATASET_CREDIT_COST
-        this.data.datasetCreditCost = [
-            { DATASET_NAME: 'HHS_NPI_Registry', CREDITS: 0.00718, COST_USD: 0.00718 },
-            { DATASET_NAME: 'Transaction Fraud Recommendation', CREDITS: 0.03666, COST_USD: 0.03666 },
-            { DATASET_NAME: 'AI Chat Sessions', CREDITS: 0.00537, COST_USD: 0.00537 },
-            { DATASET_NAME: 'AI Services', CREDITS: 0.013536, COST_USD: 0.013536 },
-            { DATASET_NAME: 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', CREDITS: 1.354891, COST_USD: 1.354891 }
-        ].map(item => ({
-            ...item,
-            CREDITS: item.CREDITS * (0.5 + Math.random()),
-            COST_USD: item.COST_USD * (0.5 + Math.random())
+        this.data.datasetCreditCost = this.mockDatasets.slice(0, 10).map(name => ({
+            DATASET_NAME: name,
+            CREDITS: +(Math.random() * 1.5 + 0.01).toFixed(5),
+            COST_USD: +(Math.random() * 1.5 + 0.01).toFixed(5)
         }));
 
         // OBS_COST_VS_UTILIZATION - using same dataset names as cost data
-        this.data.costVsUtilization = [
-            'HHS_NPI_Registry', 'Transaction Fraud Recommendation', 'AI Chat Sessions', 
-            'AI Services', 'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA', 'User_Activity_Events',
-            'Salesforce_Connector_Runs', 'Marketing_Campaign_Data', 'Customer_Support_Tickets',
-            'Product_Usage_Analytics', 'Financial_Transactions', 'Inventory_Management',
-            'Employee_Performance_Data', 'Supply_Chain_Logistics', 'Web_Analytics_Data'
-        ].map(dataset => {
+        this.data.costVsUtilization = this.mockDatasets.slice(0, 12).map(dataset => {
             const baseRuns = Math.floor(Math.random() * 50) + 10;
             const baseCost = Math.random() * 15 + 0.5;
             const baseBytesGB = Math.random() * 500 + 10;
@@ -1277,6 +1621,9 @@ ORDER BY total_users DESC`,
 
         const pageTitle = document.getElementById('pageTitle');
         const pageDescription = pageTitle.nextElementSibling;
+        if (pageDescription) {
+            pageDescription.classList.add('page-subtitle');
+        }
         
         if (titles[tabName]) {
             pageTitle.textContent = titles[tabName].title;
@@ -3305,44 +3652,7 @@ ORDER BY total_users DESC`,
         }
 
 		// Top Slowest Connector Runs Table (Pipeline Health tab)
-		try {
-			const slowestRuns = (this.data.connectorRuns || [])
-				.filter(run => run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
-				.sort((a, b) => b['Run Time Seconds'] - a['Run Time Seconds'])
-				.slice(0, 15);
-			const container = document.getElementById('slowRunsTable');
-			if (container) {
-				let html = `
-					<div class="overflow-auto h-full">
-						<table class="min-w-full">
-							<thead class="bg-gray-50 sticky top-0">
-								<tr>
-									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dataset</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run Start</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run Time (s)</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rows/sec</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bytes/sec</th>
-								</tr>
-							</thead>
-							<tbody class="bg-white divide-y divide-gray-200">`;
-				slowestRuns.forEach(run => {
-					html += `
-						<tr class="hover:bg-gray-50">
-							<td class="px-3 py-2 text-sm text-gray-900">${run['Data Source Name']}</td>
-							<td class="px-3 py-2 text-sm text-gray-500">${new Date(run['Start Time']).toLocaleString()}</td>
-							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Run Time Seconds']||0).toLocaleString()}</td>
-							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Rows Per Second']||0).toLocaleString()}</td>
-							<td class="px-3 py-2 text-sm font-mono text-gray-900">${(run['Bytes Per Second']||0).toLocaleString()}</td>
-						</tr>`;
-				});
-				html += '</tbody></table></div>';
-				container.innerHTML = html;
-			}
-		} catch (e) {
-			console.error('Error rendering slow runs table (pipeline):', e);
-			const container = document.getElementById('slowRunsTable');
-			if (container) container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Table unavailable</div>';
-		}
+		this.renderSlowRunsTableModern();
     }
 
     renderAdoptionCharts() {
