@@ -26,7 +26,11 @@ Snow-Domo 360 eliminates that context-switching by joining both telemetry source
 
 Track Snowflake spend patterns and resource utilization at a glance. KPI cards show Total Spend, Daily Credits Avg, Active Warehouses, and a composite Efficiency Score. Below the hero row, a dual-axis **Credits and Cost Over Time** chart reveals when cost rises faster than credit consumption. A **Warehouse Cost Distribution** treemap and **Warehouse Utilization** bar chart provide per-warehouse context.
 
-Further down, **Cost per Successful Row** normalizes spend against throughput, **Daily Credits by Service Type** exposes mix shifts (e.g., AI Services growing), and a **Top 10 Domo Datasets by Cost** table ranks the most expensive data assets by total USD.
+![Cost & Credits — KPI cards, Credits and Cost Over Time dual-axis chart, Warehouse Cost Distribution treemap, and Warehouse Utilization bar chart](screenshots/cost-credits-overview.png)
+
+Further down, **Cost per Successful Row** normalizes spend against throughput, **Daily Credits by Service Type** exposes mix shifts (e.g., AI Services growing), and a **Top 10 Domo Datasets by Cost** table ranks the most expensive data assets by total USD. The persistent **Alerts panel** (right) shows Created Alerts, Live Alerts with severity color-coding, and AI-generated Recommendations.
+
+![Cost & Credits — Cost per Successful Row, Daily Credits by Service Type, Top 10 Datasets by Cost, and Alerts panel with live alerts and recommendations](screenshots/cost-credits-alerts.png)
 
 | Metric | Description |
 |--------|-------------|
@@ -37,7 +41,9 @@ Further down, **Cost per Successful Row** normalizes spend against throughput, *
 
 ### Performance & Reliability
 
-Monitor query execution times and identify bottlenecks. The **bee-swarm scatter** (built with Observable Plot + D3) plots every query as an individually clickable dot — blue for fast, magenta for slow. Click any dot to open an inline details panel showing Query ID, execution time, query type, database, warehouse, and SQL text.
+Monitor query execution times and identify bottlenecks. The **bee-swarm scatter** (built with Observable Plot + D3) plots every query as an individually clickable dot — blue for fast, magenta for slow. Click any dot to open an inline **Query Details** panel showing Query ID, execution time, query type, database, warehouse, and SQL text. The Alerts panel remains accessible on the right.
+
+![Performance & Reliability — bee-swarm scatter with Query Details popout, P95 Query Duration Trend with SLA threshold, and Alerts panel](screenshots/performance-reliability.png)
 
 Below the swarm, a **P95 Query Duration Trend** line chart with an SLA threshold reference and a sortable **Slowest Connector Runs** table round out the view.
 
@@ -51,6 +57,8 @@ Below the swarm, a **P95 Query Duration Trend** line chart with an SLA threshold
 ### Pipeline Health
 
 Monitor data pipeline execution and freshness. The **Bytes Ingested & API Anomalies** chart overlays daily bytes with an API z-score band — values beyond ±2σ are shaded as anomalies. An **End-to-End Latency Heatmap** (dataset × day) helps spot chronic late feeds, while **Connector Success Rate** and **SLA Breaches Heatmap** break down reliability. Stale datasets get a clickable **Details** popout listing each one with hours since last refresh.
+
+![Pipeline Health — KPI cards, Bytes Ingested & API Anomalies with z-score band, and End-to-End Latency Heatmap](screenshots/pipeline-health.png)
 
 | Metric | Description |
 |--------|-------------|
@@ -70,7 +78,11 @@ Analyze user adoption and platform utilization patterns. The flagship chart is t
 | **Monitor** | Low cost, low utilization | Watch for growth before investing |
 | **Best Value** | Low cost, high utilization | Keep schedules, modest scale-up if queues appear |
 
-Hover any bubble for AI-generated **Why / Action / Watch** guidance.
+Hover any bubble for AI-generated **Why / Action / Watch** guidance. Below, see **Top 5 Connectors by Rows Ingested** trending over time.
+
+![Adoption & Utilization — Cost vs. Utilization quadrant (Best Value tooltip with Why / Action / Watch guidance), Top 5 Connectors by Rows Ingested, and Alerts panel](screenshots/adoption-utilization.png)
+
+![Adoption & Utilization — Rationalize quadrant tooltip showing "Poor ROI — expensive but little throughput" with actionable guidance](screenshots/adoption-rationalize.png)
 
 | Metric | Description |
 |--------|-------------|
@@ -83,6 +95,8 @@ Hover any bubble for AI-generated **Why / Action / Watch** guidance.
 
 Monitor data quality metrics, schema drift, and anomalies. The **Schema Drift → Null Regression Matrix** is a heatmap showing null-rate changes across columns from −7 to +2 days relative to a schema change event — letting you pinpoint which column adds, removes, or modifications caused regressions. A ranked **Lift (pp) vs. Baseline** table surfaces the largest percentage-point increases. **Coverage Anomalies** plots row-count z-scores across datasets, and a **Schema Drift Log** provides a filterable event timeline.
 
+![Data Quality — Schema Drift → Null Regression Matrix heatmap, Lift (pp) vs. Baseline ranked table, and Coverage Anomalies scatter](screenshots/data-quality.png)
+
 | Metric | Description |
 |--------|-------------|
 | **Data Completeness** | % of datasets with null rate below threshold |
@@ -93,7 +107,9 @@ Monitor data quality metrics, schema drift, and anomalies. The **Schema Drift �
 
 ### Data Lineage
 
-A visual DAG (directed acyclic graph) traces data from source to derived datasets. Nodes are color-coded by domain:
+A visual DAG (directed acyclic graph) traces data from source to derived datasets. Nodes are color-coded by domain with interactive search, domain filters, and view toggles (Sources Only / Derived Only). Zoom, pan, and save/export the graph.
+
+![Data Lineage — Interactive DAG with domain-colored nodes, search, domain filters (Account Usage, Domo Telemetry, Business Systems, Derived/OBS, Optimizer), and legend](screenshots/data-lineage.png)
 
 | Domain | Color | Description |
 |--------|-------|-------------|
@@ -103,13 +119,19 @@ A visual DAG (directed acyclic graph) traces data from source to derived dataset
 | **Derived / OBS** | Purple | Analytics & observability |
 | **Optimizer** | Pink | Query performance tools |
 
-Filter by domain, toggle Sources Only / Derived Only, and search by table name. Zoom, pan, and save/export the graph.
-
 ### AI Query Optimization
 
-AI-powered query rewrite recommendations with side-by-side comparison. Each query card shows original vs. optimized SQL in syntax-highlighted Monaco editors, with an optional **Show Diff** toggle for unified diff highlighting. Per-query metrics include compilation time, execution time, total elapsed time, bytes scanned, improvement %, bytes saved, and estimated USD savings.
+AI-powered query rewrite recommendations with side-by-side comparison. The view opens with summary KPI cards — **Total Queries Analyzed**, **Avg Improvement**, **Est. Credits Saved**, **Adoption Rate** — followed by a **Performance Distribution** histogram, **Action Breakdown** donut, and **Savings Timeline** area chart.
 
-The view opens with summary KPI cards — **Total Queries Analyzed**, **Avg Improvement**, **Est. Credits Saved**, **Adoption Rate** — followed by a **Performance Distribution** histogram, **Action Breakdown** donut, and **Savings Timeline** area chart.
+![AI Query Optimization — KPI cards (47 queries, 34.2% avg improvement, 20.1 est. credits saved, 80.9% adoption rate), Performance Distribution histogram, Action Breakdown donut, and Savings Timeline](screenshots/ai-optimization-overview.png)
+
+Each query card shows original vs. optimized SQL in syntax-highlighted Monaco editors. Per-query metrics include compilation time, execution time, total elapsed time, bytes scanned, improvement %, bytes saved, and estimated USD savings. Powered by Claude 4 Sonnet.
+
+![AI Query Optimization — Side-by-side Monaco editors with original and optimized SQL, per-query performance metrics, and AI Analysis summary](screenshots/ai-optimization-detail.png)
+
+Toggle **Show Diff** for unified diff highlighting — insertions in green, deletions in red — to see exactly what the AI changed.
+
+![AI Query Optimization — Show Diff mode with inline insertions (green) and deletions (red) highlighting exact SQL changes](screenshots/ai-optimization-diff.png)
 
 | Feature | Detail |
 |---------|--------|
@@ -282,6 +304,7 @@ The app ships with a comprehensive mock data generator for demos and development
 ├── app.js             # Dashboard class — data generation, live data loading, chart rendering, alerting
 ├── app.css            # Design system — metric cards, code editors, alerts, tooltips, responsive layout
 ├── manifest.json      # Domo app manifest — dataset bindings and app metadata
+├── screenshots/       # Dashboard screenshots for documentation
 ├── thumbnail.png      # App store thumbnail
 └── README.md          # This file
 ```
