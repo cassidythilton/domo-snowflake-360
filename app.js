@@ -1,0 +1,5817 @@
+// Snow-Domo 360 Dashboard JavaScript
+
+class SnowDomoDashboard {
+    constructor() {
+        this.isLiveMode = false;
+        this.isDarkMode = false;
+        this.currentDateRange = 30;
+        this.charts = {};
+        this.data = {};
+        this.alerts = [];
+        this.createdAlerts = [];
+        // newAlertEvents removed - new alerts now appear directly in Live Alerts
+        this.querySwarmChart = null;
+        this.monacoEditor = null;
+        this.queryRewriteResults = [];
+        this.filteredQueries = [];
+        this.displayedQueries = [];
+        this.queriesPerPage = 15;
+        this.currentQueryPage = 1;
+        // Feature flags
+        this.useInlineSwarmPanel = true; // Inline query details in beehive chart
+        // Sort state for Slowest Connector Runs table
+        this.slowRunsSort = { key: 'duration', dir: 'desc' };
+        
+        // Dataset aliases for live data
+        this.datasetAliases = {
+            'OBS_OBJECT_CREDIT_COST': 'OBSOBJECTCREDITCOST',
+            'OBS_DATAFLOW_RUNS': 'OBSDATAFLOWRUNS',
+            'OBS_DATASET_CREDIT_COST': 'OBSDATASETCREDITCOST',
+            'OBS_SNOWFLAKE_WAU': 'OBSSNOWFLAKEWAU',
+            'OBS_DOMO_API_ZSCORE': 'OBSDOMOAPIZSCORE',
+            'OBS_DOMO_DAILY_BYTES': 'OBSDOMODAILYBYTES',
+            'OBS_DOMO_DATA_FRESHNESS': 'OBSDOMODATAFRESHNESS',
+            'OBS_DOMO_CONNECTOR_HEALTH': 'OBSDOMOCONNECTORHEALTH',
+            'OBS_DOMO_CONNECTOR_SLA': 'OBSDOMOCONNECTORSLA',
+            'OBS_DOMO_CONNECTOR_RUNS': 'OBSDOMOCONNECTORRUNS',
+            'OBS_WAREHOUSE_EVENTS': 'OBSWAREHOUSEEVENTS',
+            'OBS_QUERY_FAILURE_RATE': 'OBSQUERYFAILURERATE',
+            'OBS_QUERY_PERFORMANCE': 'OBSQUERYPERFORMANCE',
+            'OBS_IDLE_ACTIVE_RATIO': 'OBSIDLEACTIVERATIO',
+            'OBS_CREDITS_BY_WAREHOUSE': 'OBSCREDITSBYWAREHOUSE',
+            'OBS_COST_PER_CREDIT': 'OBSCOSTPERCREDIT',
+            'OBS_QUERY_HISTORY_LTD': 'OBSQUERYHISTORYLTD',
+            'QUERY_REWRITE_RESULTS': 'QUERYREWRITERESULTS',
+            'OBS_COST_VS_UTILIZATION': 'OBSCOSTVSUTILIZATION'
+        };
+
+        this.init();
+    }
+
+    // Create Alert modal lifecycle
+    openCreateAlertModal() {
+        const modal = document.getElementById('createAlertModal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        // Populate datasets (Mock from seed; Live from placeholder later)
+        this.populateModernDatasetSelector();
+        // Initialize SQL editor (Monaco or textarea) with dark theme
+        const editorContainer = document.getElementById('sqlEditor');
+        editorContainer.innerHTML = '';
+        this.createAlertEditor = this.createMonacoEditor(editorContainer, '-- Write a SQL query that returns rows when the alert should fire', false);
+        
+        // Initialize toggle mode (default to Manual)
+        this.currentSqlMode = 'manual';
+        this.switchToManualMode();
+        
+        this.validateCreateAlertForm();
+        // Focus trap: focus first input
+        setTimeout(() => document.getElementById('alertName')?.focus(), 0);
+    }
+
+    closeCreateAlertModal() {
+        const modal = document.getElementById('createAlertModal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        this.createAlertEditor = null;
+        this.pendingAlertDraft = null;
+    }
+
+    // ---------- Helpers: formatting & stats for Slow Runs table ----------
+    formatDurationShort(totalSeconds) {
+        const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        const parts = [];
+        if (days) parts.push(days + 'd');
+        if (hours) parts.push(hours + 'h');
+        if (minutes) parts.push(minutes + 'm');
+        if (!days && !hours) parts.push(secs + 's');
+        return parts.join(' ');
+    }
+
+    formatNumber(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '—';
+        return n.toLocaleString();
+    }
+
+    formatBytesPerSecond(bytesPerSec) {
+        const n = Number(bytesPerSec);
+        if (!Number.isFinite(n) || n <= 0) return '—';
+        const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+        let idx = 0;
+        let val = n;
+        while (val >= 1024 && idx < units.length - 1) {
+            val = val / 1024;
+            idx += 1;
+        }
+        // 1–2 decimals, trim trailing zeros
+        const fixed = (val < 10 ? val.toFixed(2) : val < 100 ? val.toFixed(1) : Math.round(val).toString());
+        const pretty = typeof fixed === 'string' ? fixed.replace(/\.0+$/, '').replace(/(\.[1-9])0$/, '$1') : String(fixed);
+        return `${pretty} ${units[idx]}`;
+    }
+
+    quantile(sortedNumbers, q) {
+        const arr = sortedNumbers.filter(Number.isFinite);
+        const n = arr.length;
+        if (n === 0) return 0;
+        const pos = (n - 1) * q;
+        const base = Math.floor(pos);
+        const rest = pos - base;
+        if (arr[base + 1] !== undefined) {
+            return arr[base] + rest * (arr[base + 1] - arr[base]);
+        } else {
+            return arr[base];
+        }
+    }
+
+    handleHeaderKey(event, key) {
+        if (event && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            this.setSlowRunsSort(key);
+        }
+    }
+
+    setSlowRunsSort(key) {
+        const current = this.slowRunsSort || { key: 'duration', dir: 'desc' };
+        if (current.key === key) {
+            current.dir = current.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            current.key = key;
+            // Default directions: duration desc, rps desc, mbs desc, started desc, dataset asc
+            if (key === 'dataset') current.dir = 'asc';
+            else current.dir = 'desc';
+        }
+        this.slowRunsSort = current;
+        this.renderSlowRunsTableModern();
+    }
+
+    // Build the modernized slow runs table
+    renderSlowRunsTableModern() {
+        try {
+            const container = document.getElementById('slowRunsTable');
+            if (!container) return;
+
+            const runs = (this.data.connectorRuns || [])
+                .filter(run => run && run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
+                .map(run => ({
+                    dataset: run['Data Source Name'] || '—',
+                    started: run['Start Time'] ? new Date(run['Start Time']) : null,
+                    durationSec: Number(run['Run Time Seconds']) || 0,
+                    rowsPerSec: Number(run['Rows Per Second']) || 0,
+                    bytesPerSec: Number(run['Bytes Per Second']) || 0,
+                    raw: run
+                }));
+
+            const sort = this.slowRunsSort || { key: 'duration', dir: 'desc' };
+            const sorted = runs.sort((a, b) => {
+                const dir = sort.dir === 'asc' ? 1 : -1;
+                switch (sort.key) {
+                    case 'dataset':
+                        return dir * String(a.dataset).localeCompare(String(b.dataset));
+                    case 'started':
+                        return dir * (((a.started || 0).valueOf()) - ((b.started || 0).valueOf()));
+                    case 'rps':
+                        return dir * (a.rowsPerSec - b.rowsPerSec);
+                    case 'mbs':
+                        return dir * (a.bytesPerSec - b.bytesPerSec);
+                    case 'duration':
+                    default:
+                        return dir * (a.durationSec - b.durationSec);
+                }
+            });
+
+            const displayed = sorted.slice(0, 15);
+            const durations = displayed.map(r => r.durationSec).filter(Number.isFinite).sort((x, y) => x - y);
+            const rpsValues = displayed.map(r => r.rowsPerSec).filter(Number.isFinite).sort((x, y) => x - y);
+            const p50 = this.quantile(durations, 0.5);
+            const p90 = this.quantile(durations, 0.9);
+            const p95 = this.quantile(durations, 0.95);
+            const medianRps = this.quantile(rpsValues, 0.5);
+
+            // Summary strip
+            const summaryHtml = `
+                <div class="flex items-center gap-1 mb-2 text-gray-700" style="font-size:8px">
+                    <span class="chip chip-xs" style="font-size:8px" title="p50 (median): 50th percentile of durations among displayed runs. Half are faster, half are slower.">p50 Duration: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatDurationShort(p50)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px" title="p95: 95th percentile of durations among displayed runs. 95% complete in this time or less.">p95 Duration: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatDurationShort(p95)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px">Median r/s: <span class="font-mono num-tabular" style="font-size:inherit">${this.formatNumber(medianRps)}</span></span>
+                    <span class="chip chip-xs" style="font-size:8px">Rows shown: ${displayed.length}</span>
+                </div>`;
+
+            // ARIA sort states
+            const ariaFor = (key) => (sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+            const sortIcon = (key) => sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : '';
+
+            // Re-render on resize for responsive switch without Tailwind
+            if (!this._slowRunsResizeBound) {
+                this._slowRunsResizeBound = true;
+                window.addEventListener('resize', () => this.renderSlowRunsTableModern());
+            }
+
+            const isMobile = window.innerWidth && window.innerWidth < 768;
+
+            // Desktop table (>=768px)
+            let tableHtml = `
+                <div>
+                    <table class="min-w-full t-compact zebra-light">
+                        <thead class="sticky top-0 bg-white border-b border-gray-200">
+                            <tr>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('dataset')}" onclick="dashboard.setSlowRunsSort('dataset')" onkeydown="dashboard.handleHeaderKey(event,'dataset')">Dataset</th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('started')}" onclick="dashboard.setSlowRunsSort('started')" onkeydown="dashboard.handleHeaderKey(event,'started')">Started <span class="sort-icon">${sortIcon('started')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-left text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('duration')}" onclick="dashboard.setSlowRunsSort('duration')" onkeydown="dashboard.handleHeaderKey(event,'duration')">Duration <span class="sort-icon">${sortIcon('duration')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-right text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('rps')}" onclick="dashboard.setSlowRunsSort('rps')" onkeydown="dashboard.handleHeaderKey(event,'rps')">r/s <span class="sort-icon">${sortIcon('rps')}</span></th>
+                                <th scope="col" tabindex="0" class="px-3 py-2 text-right text-xs font-medium text-gray-600 tracking-wider header-cell focus-ring" aria-sort="${ariaFor('mbs')}" onclick="dashboard.setSlowRunsSort('mbs')" onkeydown="dashboard.handleHeaderKey(event,'mbs')">MB/s <span class="sort-icon">${sortIcon('mbs')}</span></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+            `;
+
+            displayed.forEach(row => {
+                const startedText = row.started ? row.started.toLocaleString() : '—';
+                const durationText = this.formatDurationShort(row.durationSec);
+                const durationTooltip = `${row.durationSec} seconds`;
+                const barWidth = p95 > 0 ? Math.min(100, Math.round((row.durationSec / p95) * 100)) : 0;
+                const barClass = row.durationSec >= p90 ? 'bar-warn' : 'bar-neutral';
+                const rpsText = this.formatNumber(row.rowsPerSec);
+                const bpsText = this.formatBytesPerSecond(row.bytesPerSec);
+                const bpsTitle = `${(row.bytesPerSec || 0).toLocaleString()} B/s`;
+
+                tableHtml += `
+                    <tr class="hover:bg-gray-50 focus-ring" tabindex="0">
+                        <td class="px-3 py-2 text-sm text-gray-900">${row.dataset}</td>
+                        <td class="px-3 py-2 text-sm text-gray-600">${startedText}</td>
+                        <td class="px-3 py-2 text-sm text-gray-900">
+                            <div class="flex items-center justify-between gap-3" title="${durationTooltip}">
+                                <span class="font-mono num-tabular">${durationText}</span>
+                                <div class="duration-bar ${barClass}"><div style="width:${barWidth}%;"></div></div>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2 text-sm text-gray-900 num-tabular num-right" title="Rows per second">${rpsText}</td>
+                        <td class="px-3 py-2 text-sm text-gray-900 num-tabular num-right" title="${bpsTitle}">${bpsText}</td>
+                    </tr>
+                `;
+            });
+
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            // Mobile list (<768px)
+            let listHtml = `
+                <div>
+                    <ul class="divide-y divide-gray-100 zebra-light rounded-md">
+            `;
+            displayed.forEach(row => {
+                const startedText = row.started ? row.started.toLocaleString() : '—';
+                const durationText = this.formatDurationShort(row.durationSec);
+                const durationTooltip = `${row.durationSec} seconds`;
+                const barWidth = p95 > 0 ? Math.min(100, Math.round((row.durationSec / p95) * 100)) : 0;
+                const barClass = row.durationSec >= p90 ? 'bar-warn' : 'bar-neutral';
+                const rpsText = this.formatNumber(row.rowsPerSec);
+                const bpsText = this.formatBytesPerSecond(row.bytesPerSec);
+                const bpsTitle = `${(row.bytesPerSec || 0).toLocaleString()} B/s`;
+                listHtml += `
+                    <li class="py-2 px-3 hover:bg-gray-50 focus-ring" tabindex="0">
+                        <div class="flex items-center justify-between text-[14px]">
+                            <div class="font-medium text-gray-900 mr-3 truncate">${row.dataset}</div>
+                            <div class="flex items-center gap-3 text-gray-900" title="${durationTooltip}">
+                                <span class="font-mono num-tabular">${durationText}</span>
+                                <div class="duration-bar ${barClass}"><div style="width:${barWidth}%;"></div></div>
+                            </div>
+                        </div>
+                        <div class="mt-1 text-[12px] text-gray-600 flex items-center gap-2">
+                            <span>${startedText}</span>
+                            <span>•</span>
+                            <span class="font-mono num-tabular" title="Rows per second">${rpsText} r/s</span>
+                            <span>•</span>
+                            <span class="font-mono num-tabular" title="${bpsTitle}">${bpsText}</span>
+                        </div>
+                    </li>
+                `;
+            });
+            listHtml += `</ul></div>`;
+
+            container.innerHTML = isMobile ? (summaryHtml + listHtml) : (summaryHtml + tableHtml);
+        } catch (e) {
+            console.error('Error rendering slow runs table (pipeline):', e);
+            const container = document.getElementById('slowRunsTable');
+            if (container) container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Table unavailable</div>';
+        }
+    }
+
+    handleCancelCreateAlert() {
+        const name = (document.getElementById('alertName').value || '').trim();
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const hasChanges = name.length > 0 || (sql && sql.trim().length > 0);
+        if (hasChanges) {
+            if (!confirm('Discard changes?')) return;
+        }
+        this.closeCreateAlertModal();
+    }
+
+    validateCreateAlertForm() {
+        const nameEl = document.getElementById('alertName');
+        const dsEl = document.getElementById('alertDatasets');
+        const levelEl = document.getElementById('alertLevel');
+        const name = (nameEl.value || '').trim();
+        const datasets = Array.from(dsEl.selectedOptions).map(o => o.value);
+        const level = levelEl.value;
+        const nameValid = name.length >= 3 && name.length <= 80 && !this.createdAlerts.some(a => a.name.toLowerCase() === name.toLowerCase());
+        document.getElementById('alertNameError').classList.toggle('hidden', nameValid);
+        const dsValid = datasets.length > 0;
+        document.getElementById('alertDatasetsError').classList.toggle('hidden', dsValid);
+        const levelValid = !!level;
+        document.getElementById('alertLevelError').classList.toggle('hidden', levelValid);
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const sqlValid = !!sql && sql.trim().length > 0;
+        document.getElementById('sqlError').classList.toggle('hidden', sqlValid);
+        document.getElementById('saveCreateAlert').disabled = !(nameValid && dsValid && levelValid && sqlValid);
+        return { name, datasets, level, sqlValid };
+    }
+
+    async handleSaveCreateAlert() {
+        const nameEl = document.getElementById('alertName');
+        const descEl = document.getElementById('alertDesc');
+        const dsEl = document.getElementById('alertDatasets');
+        const levelEl = document.getElementById('alertLevel');
+        const sql = this.createAlertEditor ? this.createAlertEditor.getValue() : '';
+        const datasets = Array.from(dsEl.selectedOptions).map(o => o.value);
+        const level = levelEl.value;
+        const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
+
+        // Persist (Mock: in-memory)
+        const newAlert = {
+            id: 'mock_' + Math.random().toString(36).slice(2, 9),
+            name: (nameEl.value || '').trim(),
+            description: (descEl.value || '').trim(),
+            datasets,
+            sql,
+            level,
+            levelLabel,
+            status: 'implementing',
+            createdBy: 'You',
+            createdOn: new Date()
+        };
+        this.createdAlerts.unshift(newAlert);
+        this.renderAlerts();
+
+        // Close modal and toast equivalent via console (non-blocking)
+        this.closeCreateAlertModal();
+        // Implementing alert
+
+        // Simulate implementing and activation after 2–3s
+        setTimeout(() => {
+            newAlert.status = 'active';
+            this.renderAlerts();
+            // Mock firing logic removed - new alerts now appear directly in Live Alerts with NEW styling
+        }, 2000 + Math.random()*1000);
+    }
+
+    // Populate the modern dataset selector
+    populateModernDatasetSelector() {
+        const datasetList = document.getElementById('datasetList');
+        const dsSelect = document.getElementById('alertDatasets'); // Hidden select for compatibility
+        const searchInput = document.getElementById('datasetSearch');
+        
+        if (!datasetList || !dsSelect || !searchInput) return;
+        
+        const list = this.isLiveMode ? (this.liveDatasets || []) : (this.mockDatasets || []);
+        const selectedDatasets = new Set();
+        
+        // Clear existing content
+        datasetList.innerHTML = '';
+        dsSelect.innerHTML = '';
+        
+        // Create dataset options
+        const allOptions = list.map(name => {
+            const option = document.createElement('div');
+            option.className = 'dataset-option';
+            option.dataset.value = name;
+            option.innerHTML = `
+                <div class="dataset-name">${name}</div>
+                <div class="dataset-type">Dataset</div>
+            `;
+            
+            // Add click handler
+            option.addEventListener('click', () => {
+                if (selectedDatasets.has(name)) {
+                    selectedDatasets.delete(name);
+                    option.classList.remove('selected');
+                } else {
+                    selectedDatasets.add(name);
+                    option.classList.add('selected');
+                }
+                this.updateHiddenSelect(selectedDatasets);
+                this.validateCreateAlertForm();
+            });
+            
+            return { element: option, name: name.toLowerCase() };
+        });
+        
+        // Initial render
+        allOptions.forEach(opt => datasetList.appendChild(opt.element));
+        
+        // Add search functionality
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            datasetList.innerHTML = '';
+            
+            allOptions
+                .filter(opt => opt.name.includes(searchTerm))
+                .forEach(opt => datasetList.appendChild(opt.element));
+        });
+        
+        // Setup hidden select for compatibility
+        this.updateHiddenSelect(selectedDatasets);
+    }
+    
+    // Update the hidden select element to maintain compatibility
+    updateHiddenSelect(selectedDatasets) {
+        const dsSelect = document.getElementById('alertDatasets');
+        dsSelect.innerHTML = '';
+        
+        Array.from(selectedDatasets).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            opt.selected = true;
+            dsSelect.appendChild(opt);
+        });
+    }
+
+    // Handle SQL mode switching
+    switchToManualMode() {
+        this.currentSqlMode = 'manual';
+        
+        // Update button styles
+        const manualBtn = document.getElementById('manualModeBtn');
+        const aiBtn = document.getElementById('aiModeBtn');
+        const manualMode = document.getElementById('manualMode');
+        const aiMode = document.getElementById('aiMode');
+        
+        if (manualBtn && aiBtn && manualMode && aiMode) {
+            manualBtn.className = 'flex-1 flex items-center justify-center gap-1 py-1 px-3 rounded-lg transition-all font-medium text-sm';
+            manualBtn.style.color = '#24BFF2';
+            aiBtn.className = 'flex-1 flex items-center justify-center gap-1 py-1 px-3 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
+            
+            manualMode.classList.remove('hidden');
+            aiMode.classList.add('hidden');
+        }
+    }
+    
+    switchToAIMode() {
+        this.currentSqlMode = 'ai';
+        
+        // Update button styles
+        const manualBtn = document.getElementById('manualModeBtn');
+        const aiBtn = document.getElementById('aiModeBtn');
+        const manualMode = document.getElementById('manualMode');
+        const aiMode = document.getElementById('aiMode');
+        
+        if (manualBtn && aiBtn && manualMode && aiMode) {
+            manualBtn.className = 'flex-1 flex items-center justify-center gap-1 py-1 px-3 rounded-lg transition-all font-medium text-sm text-gray-600 hover:text-gray-800';
+            aiBtn.className = 'flex-1 flex items-center justify-center gap-1 py-1 px-3 rounded-lg transition-all font-medium text-sm text-white shadow-sm';
+            aiBtn.style.background = '#A62A92';
+            
+            manualMode.classList.add('hidden');
+            aiMode.classList.remove('hidden');
+        }
+        
+        // Focus the AI prompt
+        setTimeout(() => document.getElementById('aiPrompt')?.focus(), 100);
+    }
+    
+    async handleAIGenerate() {
+        const prompt = document.getElementById('aiPrompt').value.trim();
+        if (!prompt) return;
+        
+        const statusEl = document.getElementById('aiStatus');
+        const errorEl = document.getElementById('aiError');
+        const generateBtn = document.getElementById('generateSqlBtn');
+        
+        // Show loading state
+        statusEl.classList.remove('hidden');
+        errorEl.classList.add('hidden');
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = `
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Generating...
+        `;
+        
+        try {
+            const sql = await this.generateSQLWithCortex(prompt);
+            if (this.createAlertEditor) {
+                this.createAlertEditor.setValue(sql);
+                this.validateCreateAlertForm();
+            }
+            // Auto-switch to manual mode after generation
+            this.switchToManualMode();
+        } catch (error) {
+            errorEl.classList.remove('hidden');
+            statusEl.classList.add('hidden');
+        } finally {
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = `
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    <circle cx="12" cy="12" r="1"/>
+                    <path d="m19 19-2-2m-5 5-2-2"/>
+                </svg>
+                Generate SQL
+            `;
+            statusEl.classList.add('hidden');
+        }
+    }
+
+    // Cortex stub for generating SQL from natural language
+    async generateSQLWithCortex(prompt) {
+        await new Promise(r => setTimeout(r, 1200));
+        // Simple stubbed responses tailored to Snowflake
+        const samples = [
+            "SELECT dataset, count(*) AS duplicate_count FROM records GROUP BY dataset HAVING duplicate_count > 0;",
+            "SELECT * FROM quality_checks WHERE orphan_rate > 0.05;",
+            "SELECT dataset, run_id, error_message FROM pipeline_runs WHERE status = 'FAILED';",
+            "SELECT table_name, column_name, violation_count FROM data_validation WHERE rule_type = 'COMPLETENESS' AND violation_count > 100;",
+            "SELECT dataset_name, freshness_hours FROM data_freshness WHERE freshness_hours > 24;"
+        ];
+        return samples[Math.floor(Math.random()*samples.length)];
+    }
+    init() {
+        this.setupEventListeners();
+        this.generateMockData();
+        this.generateQueryRewriteData();
+        this.renderDashboard();
+        this.generateAlerts();
+        this.filterQueries(); // Initialize query optimization tab
+        this.setupTooltips();
+        this.initializeMonacoEditor();
+        this.initializeTheme();
+    }
+
+    // Initialize theme from localStorage or default to light
+    initializeTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        this.isDarkMode = savedTheme === 'dark';
+        this.applyTheme();
+    }
+
+    // Apply theme to document
+    applyTheme() {
+        if (this.isDarkMode) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        
+        // Update toggle button
+        const themeToggle = document.getElementById('themeToggle');
+        const icon = themeToggle.querySelector('.theme-toggle-icon');
+        const text = themeToggle.querySelector('.theme-toggle-text');
+        
+        if (this.isDarkMode) {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>';
+            text.textContent = 'Light Mode';
+        } else {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
+            text.textContent = 'Dark Mode';
+        }
+        
+        localStorage.setItem('theme', this.isDarkMode ? 'dark' : 'light');
+    }
+
+    // Toggle theme
+    toggleTheme() {
+        this.isDarkMode = !this.isDarkMode;
+        this.applyTheme();
+        
+        // Re-render charts to apply theme colors
+        setTimeout(() => {
+            this.renderDashboard();
+        }, 100);
+    }
+
+    // SQL Auto-formatting function
+    formatSQL(sql) {
+        if (!sql) return '';
+        
+        // SQL keywords to uppercase
+        const keywords = [
+            'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'OUTER', 'LEFT', 'RIGHT', 'FULL',
+            'ON', 'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'IS', 'NULL',
+            'GROUP', 'BY', 'HAVING', 'ORDER', 'ASC', 'DESC', 'LIMIT', 'OFFSET',
+            'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE',
+            'ALTER', 'DROP', 'INDEX', 'VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER',
+            'UNION', 'ALL', 'DISTINCT', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+            'IF', 'IFNULL', 'COALESCE', 'CAST', 'CONVERT', 'SUBSTRING', 'TRIM',
+            'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DATE', 'TIME', 'TIMESTAMP',
+            'WITH', 'MATERIALIZED', 'CTE', 'RECURSIVE'
+        ];
+        
+        let formatted = sql;
+        
+        // Apply keyword formatting
+        keywords.forEach(keyword => {
+            const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+            formatted = formatted.replace(regex, keyword.toUpperCase());
+        });
+        
+        // Clean up whitespace and apply indentation
+        formatted = formatted
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .replace(/,\s*/g, ',\n    ') // Comma formatting
+            .replace(/\bFROM\b/g, '\nFROM')
+            .replace(/\bWHERE\b/g, '\nWHERE')
+            .replace(/\bAND\b/g, '\n    AND')
+            .replace(/\bOR\b/g, '\n    OR')
+            .replace(/\bJOIN\b/g, '\nJOIN')
+            .replace(/\bLEFT JOIN\b/g, '\nLEFT JOIN')
+            .replace(/\bRIGHT JOIN\b/g, '\nRIGHT JOIN')
+            .replace(/\bINNER JOIN\b/g, '\nINNER JOIN')
+            .replace(/\bOUTER JOIN\b/g, '\nOUTER JOIN')
+            .replace(/\bGROUP BY\b/g, '\nGROUP BY')
+            .replace(/\bORDER BY\b/g, '\nORDER BY')
+            .replace(/\bHAVING\b/g, '\nHAVING')
+            .replace(/\bWITH\b/g, '\nWITH')
+            .trim();
+        
+        return formatted;
+    }
+
+    // Helper method for exponential distribution
+    exponentialRandom() {
+        return -Math.log(1 - Math.random());
+    }
+
+    setupEventListeners() {
+        // Tab switching with navigation
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tab = e.currentTarget.dataset.tab;
+                this.switchTab(tab);
+            });
+        });
+
+        // Data mode toggle
+        document.getElementById('dataToggle').addEventListener('click', () => {
+            this.toggleDataMode();
+        });
+
+        // Theme toggle
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            this.toggleTheme();
+        });
+
+        // Date range change (legacy select, only if present)
+        const dateRangeSelect = document.getElementById('dateRange');
+        if (dateRangeSelect) {
+            dateRangeSelect.addEventListener('change', (e) => {
+                this.currentDateRange = parseInt(e.target.value);
+                this.refreshData();
+            });
+        }
+
+        // Enhanced Database combobox interactions
+        const dbCombo = document.getElementById('dbCombo');
+        if (dbCombo) {
+            const toggle = dbCombo.querySelector('.combo-toggle');
+            const label = dbCombo.querySelector('#dbComboLabel');
+            const search = dbCombo.querySelector('#dbSearch');
+            const list = dbCombo.querySelector('#dbOptions');
+
+            const setExpanded = (open) => {
+                dbCombo.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) setTimeout(() => search.focus(), 0);
+            };
+
+            toggle.addEventListener('click', () => setExpanded(dbCombo.getAttribute('aria-expanded') !== 'true'));
+
+            document.addEventListener('click', (e) => {
+                if (!dbCombo.contains(e.target)) setExpanded(false);
+            });
+
+            search.addEventListener('input', () => {
+                const q = search.value.toLowerCase();
+                list.querySelectorAll('.combo-option').forEach(li => {
+                    const text = li.textContent.toLowerCase();
+                    li.style.display = text.includes(q) ? '' : 'none';
+                });
+            });
+
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option');
+                if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false'));
+                li.setAttribute('aria-selected', 'true');
+                const value = li.dataset.value || '';
+                label.textContent = li.textContent.trim();
+                this.currentDatabase = value;
+                setExpanded(false);
+                this.refreshData();
+            });
+        }
+
+        // Enhanced Period combobox
+        const pCombo = document.getElementById('periodCombo');
+        if (pCombo) {
+            const toggle = pCombo.querySelector('.combo-toggle');
+            const label = pCombo.querySelector('#periodComboLabel');
+            const search = pCombo.querySelector('#periodSearch');
+            const list = pCombo.querySelector('#periodOptions');
+            const setExpanded = (open) => { pCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(pCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!pCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentDateRange = parseInt(li.dataset.value || '30'); setExpanded(false); this.refreshData();
+            });
+        }
+
+        // Enhanced Warehouse combobox
+        const whCombo = document.getElementById('whCombo');
+        if (whCombo) {
+            const toggle = whCombo.querySelector('.combo-toggle');
+            const label = whCombo.querySelector('#whComboLabel');
+            const search = whCombo.querySelector('#whSearch');
+            const list = whCombo.querySelector('#whOptions');
+            const setExpanded = (open) => { whCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(whCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!whCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentWarehouse = li.dataset.value || ''; setExpanded(false); this.refreshData();
+            });
+        }
+
+        // Enhanced Schema combobox
+        const sCombo = document.getElementById('schemaCombo');
+        if (sCombo) {
+            const toggle = sCombo.querySelector('.combo-toggle');
+            const label = sCombo.querySelector('#schemaComboLabel');
+            const search = sCombo.querySelector('#schemaSearch');
+            const list = sCombo.querySelector('#schemaOptions');
+            const setExpanded = (open) => { sCombo.setAttribute('aria-expanded', open ? 'true' : 'false'); if (open) setTimeout(()=>search.focus(),0); };
+            toggle.addEventListener('click', () => setExpanded(sCombo.getAttribute('aria-expanded') !== 'true'));
+            document.addEventListener('click', (e) => { if (!sCombo.contains(e.target)) setExpanded(false); });
+            search.addEventListener('input', () => { const q = search.value.toLowerCase(); list.querySelectorAll('.combo-option').forEach(li => li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'); });
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.combo-option'); if (!li) return;
+                list.querySelectorAll('.combo-option').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected','true');
+                label.textContent = li.textContent.trim(); this.currentSchema = li.dataset.value || ''; setExpanded(false); this.refreshData();
+            });
+        }
+
+        // Refresh button
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            this.refreshData();
+        });
+
+        // Sidebar toggle
+        document.getElementById('closeSidebar').addEventListener('click', () => {
+            this.toggleSidebar();
+        });
+
+        // Show more alerts
+        document.getElementById('showMoreAlerts').addEventListener('click', () => {
+            this.showMoreAlerts();
+        });
+        // Recommendations collapse toggle with session memory
+        const recsToggle = document.getElementById('recsToggle');
+        if (recsToggle) {
+            const recsState = sessionStorage.getItem('recsCollapsed') === 'true';
+            const recsSection = document.getElementById('recsSection');
+            if (recsState) {
+                recsSection.style.display = 'none';
+                recsToggle.textContent = 'Show';
+            }
+            recsToggle.addEventListener('click', () => {
+                const hidden = recsSection.style.display === 'none';
+                recsSection.style.display = hidden ? '' : 'none';
+                recsToggle.textContent = hidden ? 'Hide' : 'Show';
+                sessionStorage.setItem('recsCollapsed', (!hidden).toString());
+            });
+        }
+
+        // Query Details Modal handling
+        document.getElementById('closeModal').addEventListener('click', () => {
+            this.closeModal();
+        });
+
+        document.getElementById('modalBackdrop').addEventListener('click', () => {
+            this.closeModal();
+        });
+
+        // Escape key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeModal();
+                this.closeCreateAlertModal();
+            }
+        });
+
+        // Query optimization filters
+        document.getElementById('actionFilter').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('improvementFilter').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('sortBy').addEventListener('change', () => {
+            this.filterQueries();
+        });
+
+        document.getElementById('searchQueries').addEventListener('input', () => {
+            this.filterQueries();
+        });
+
+        // Load More Queries functionality removed - show all by default
+
+        // Remove old cortex button handler - now handled by openCortexModal
+        // Create Alert modal events
+        document.getElementById('newAlertBtn').addEventListener('click', () => this.openCreateAlertModal());
+        document.getElementById('createAlertBackdrop').addEventListener('click', () => this.closeCreateAlertModal());
+        document.getElementById('closeCreateAlert').addEventListener('click', () => this.closeCreateAlertModal());
+        document.getElementById('cancelCreateAlert').addEventListener('click', () => this.handleCancelCreateAlert());
+        document.getElementById('saveCreateAlert').addEventListener('click', () => this.handleSaveCreateAlert());
+
+        ['alertName','alertLevel'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => this.validateCreateAlertForm());
+            document.getElementById(id).addEventListener('change', () => this.validateCreateAlertForm());
+        });
+        
+        // Dataset selection is now handled in populateModernDatasetSelector()
+
+        // SQL mode toggle events
+        const manualModeBtn = document.getElementById('manualModeBtn');
+        const aiModeBtn = document.getElementById('aiModeBtn');
+        const generateSqlBtn = document.getElementById('generateSqlBtn');
+        
+        if (manualModeBtn && aiModeBtn && generateSqlBtn) {
+            manualModeBtn.addEventListener('click', () => this.switchToManualMode());
+            aiModeBtn.addEventListener('click', () => this.switchToAIMode());
+            generateSqlBtn.addEventListener('click', () => this.handleAIGenerate());
+        }
+    }
+
+    generateMockData() {
+        // Unified dataset name pool used across all mock charts
+        const datasetNamePool = [
+            'LIVESTREAM OPPORTUNITIES',
+            'GOLD LOANS',
+            'GOLD MAINTENANCE REQUESTS',
+            'ACCOUNTS',
+            'RETAIL_HIGH_RISK_CUSTOMER',
+            'DOMO DATASETS | BO',
+            'RAIDAR ACCOUNTS',
+            'TEST250620',
+            'NSW FUEL STATIONS',
+            'AI SERVICES',
+            'WEATHER_COLLECTION__APP_DB',
+            'SALESFORCE.ACCOUNTS.WILDCAT',
+            'SNOWFLAKE.SALESFORCE.ACCOUNT.COBRA',
+            'MANUFACTURING_INVENTORY_NEW',
+            'AI CHAT SESSIONS',
+            'PROMOGENIE_RESULTS_CLAUDECODE.CSV',
+            'SNOWFLAKE.SALESFORCE.CONTACT.COBRA',
+            'WEATHER FORECAST',
+            'CURRENCY_250620',
+            'SEMINAR TABLE',
+            'OPPORTUNITY TEST',
+            'GOLD PROPERTIES WITH PAYMENTS',
+            'DOMOSTATS | DATAFLOW HISTORY',
+            'ATM - TRANSACTION FRAUD RECOMMENDATIONS',
+            'DEMO',
+            'SF_OPORTUNIDADES',
+            'CONTACTS',
+            'NSW FUEL PRICES',
+            'REVELIO | REVELIO_DOMO_POSTINGS_UNIFIED_DYNAMICS2_LATEST',
+            'HHS_NPI_REGISTRY'
+        ];
+        const pickUnique = (n) => {
+            const arr = [...datasetNamePool];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr.slice(0, Math.min(n, arr.length));
+        };
+        this.mockDatasets = [...datasetNamePool];
+        const endDate = new Date();
+        const startDate = new Date(endDate.getTime() - (this.currentDateRange * 24 * 60 * 60 * 1000));
+        // Generate date array
+        const dates = [];
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            dates.push(new Date(d));
+        }
+
+        // Data Quality mock datasets
+        // Coverage anomalies (ROWS_LOADED with z-score) - more realistic anomaly patterns
+        this.data.dataCoverage = [];
+        const dqDatasets = pickUnique(3);
+        dates.forEach((date, dateIndex) => {
+            dqDatasets.forEach((ds, dsIndex) => {
+                // Base average varies by dataset
+                const baseAvg = [25000, 45000, 35000][dsIndex];
+                const avgRows30d = baseAvg + (Math.sin(dateIndex * 0.1) * 5000); // Seasonal variation
+                
+                // Most points are normal (z-score between -1.5 and 1.5)
+                let z = (Math.random() - 0.5) * 3; // Normal range
+                
+                // Inject specific anomalies (5% chance of strong anomaly)
+                if (Math.random() < 0.05) {
+                    z = (Math.random() > 0.5 ? 1 : -1) * (2.5 + Math.random() * 2); // Strong anomaly
+                } else if (Math.random() < 0.15) {
+                    z = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 0.5); // Mild anomaly
+                }
+                
+                // Calculate actual rows with some noise
+                const variation = z * (avgRows30d * 0.2);
+                const rows = Math.max(1000, Math.round(avgRows30d + variation + (Math.random() - 0.5) * 2000));
+                
+                this.data.dataCoverage.push({ 
+                    RUN_DATE: date, 
+                    DATASET: ds, 
+                    ROWS_LOADED: rows, 
+                    AVG_ROWS_30D: Math.round(avgRows30d), 
+                    ZSCORE_ROWS_LOADED: parseFloat(z.toFixed(2))
+                });
+            });
+        });
+
+        // Completeness (NULL_PCT_* and DUP_PK_COUNT)
+        this.data.dataCompleteness = dqDatasets.map(ds => {
+            const base = { AS_OF_DATE: new Date(), DATASET: ds, ROW_COUNT: Math.floor(Math.random()*100000)+5000, DUP_PK_COUNT: Math.random()<0.3?Math.floor(Math.random()*50):0 };
+            ['EMAIL','PHONE','ADDRESS','CUSTOMER_ID','ORDER_DATE'].forEach(col => base[`NULL_PCT_${col}`] = +(Math.random()*15).toFixed(1));
+            return base;
+        });
+
+        // Accuracy (rule violations over days)
+        this.data.dataAccuracy = [];
+        const rules = ['EMAIL_FORMAT','PHONE_LENGTH','POSITIVE_AMOUNT','FUTURE_DATE','VALID_STATUS'];
+        dates.forEach(date => {
+            rules.forEach(rule => {
+                this.data.dataAccuracy.push({ RUN_TS: date, RULE_ID: rule, TABLE_FQN: 'DB.SCHEMA.TABLE', RULE_DESC: rule, VIOLATIONS: Math.floor(Math.random()*100) });
+            });
+        });
+
+        // Consistency (orphan rows by check)
+        this.data.dataConsistency = ['FK_CUSTOMERS_ORDERS','FK_ORDERS_PRODUCTS','FK_USERS_ADDRESSES','FK_PRODUCTS_CATEGORIES','FK_ORDERS_PAYMENTS']
+            .map(name => ({ AS_OF_DATE: new Date(), CHECK_NAME: name, ORPHAN_ROWS: Math.floor(Math.random()*500) }));
+
+        // Schema drift (latest 50 changes)
+        this.data.schemaDrift = Array.from({length:50}).map(() => ({
+            CHANGE_DATE: new Date(Date.now()-Math.floor(Math.random()*30)*86400000),
+            CHANGE_TYPE: ['ADDED','REMOVED','MODIFIED'][Math.floor(Math.random()*3)],
+            TABLE_CATALOG: 'DATASETS',
+            TABLE_SCHEMA: 'PUBLIC',
+            TABLE_NAME: this.mockDatasets[Math.floor(Math.random()*this.mockDatasets.length)],
+            COLUMN_NAME: ['EMAIL','PHONE','ADDRESS','CREATED_AT','UPDATED_AT','STATUS','AMOUNT'][Math.floor(Math.random()*7)],
+            DATA_TYPE: ['VARCHAR(255)','INTEGER','TIMESTAMP','BOOLEAN','DECIMAL(10,2)'][Math.floor(Math.random()*5)]
+        })).sort((a,b) => b.CHANGE_DATE - a.CHANGE_DATE);
+
+        // OBS_DATA_COMPLETENESS_TALL (mock tall completeness history)
+        // Fields: AS_OF_DATE, TABLE_FQN, COLUMN_NAME, ROW_COUNT, NULL_PCT
+        this.data.dataCompletenessTall = [];
+        const sampleTables = this.mockDatasets.slice(0, 8).map(n => ({
+            dataset: n,
+            catalog: 'DATASETS',
+            schema: 'PUBLIC',
+            table: n.replace(/\s+/g, '_').toUpperCase()
+        }));
+        const colsPool = ['EMAIL','PHONE','ADDRESS','CREATED_AT','UPDATED_AT','STATUS','AMOUNT'];
+        dates.forEach(date => {
+            sampleTables.forEach(t => {
+                const fqn = `${t.catalog}.${t.schema}.${t.table}`;
+                colsPool.forEach(col => {
+                    const base = 0.02 + Math.random() * 0.15; // 2%–17%
+                    const noise = (Math.random() - 0.5) * 0.04; // ±4%
+                    const pct = Math.max(0, Math.min(1, base + noise));
+                    this.data.dataCompletenessTall.push({
+                        AS_OF_DATE: new Date(date),
+                        TABLE_FQN: fqn,
+                        COLUMN_NAME: col,
+                        ROW_COUNT: Math.floor(10000 + Math.random() * 500000),
+                        NULL_PCT: pct
+                    });
+                });
+            });
+        });
+
+        // Inject some step-changes near synthetic drift dates for realism
+        (this.data.schemaDrift || []).slice(0, 20).forEach(drift => {
+            const driftDate = new Date(drift.CHANGE_DATE);
+            const fqn = `${drift.TABLE_CATALOG}.${drift.TABLE_SCHEMA}.${drift.TABLE_NAME.replace(/\s+/g,'_').toUpperCase()}`;
+            const col = drift.COLUMN_NAME;
+            this.data.dataCompletenessTall.forEach(r => {
+                const same = r.TABLE_FQN === fqn && r.COLUMN_NAME === col;
+                if (!same) return;
+                const deltaDays = Math.round((new Date(r.AS_OF_DATE) - driftDate) / 86400000);
+                if (deltaDays >= 0 && deltaDays <= 2) {
+                    r.NULL_PCT = Math.min(1, r.NULL_PCT + 0.10 + Math.random()*0.05);
+                }
+            });
+        });
+
+        // OBS_COMPLETENESS_CONFIG mock mapping for dataset label by TABLE_FQN
+        this.data.completenessConfig = sampleTables.map(t => ({
+            DATASET: t.dataset,
+            TABLE_FQN: `${t.catalog}.${t.schema}.${t.table}`
+        }));
+
+        // OBS_COST_PER_CREDIT
+        this.data.costPerCredit = [];
+        dates.forEach(date => {
+            ['WAREHOUSE_METERING', 'AI_SERVICES', 'SNOWPARK_CONTAINER_SERVICES'].forEach(serviceType => {
+                const credits = Math.random() * 50 + 10;
+                const cost = credits * 2 * (0.8 + Math.random() * 0.4); // Cost ~2x credits with some variance
+                this.data.costPerCredit.push({
+                    USAGE_DATE: date,
+                    SERVICE_TYPE: serviceType,
+                    CREDITS: credits,
+                    CREDITS_USED: credits, // Add the field the chart is looking for
+                    SPEND_USD: cost
+                });
+            });
+        });
+
+        // Minimal successful rows throughput to power Cost/Row efficiency
+        // Create a synthetic successful rows series aligned by date
+        this.data.successfulRows = [];
+        dates.forEach(date => {
+            // Simulate some days with no loads to respect the requirement to ignore zero-row days
+            const rowsLoaded = Math.random() > 0.15 ? Math.floor(Math.random() * 900000 + 10000) : 0;
+            this.data.successfulRows.push({
+                RUN_DATE: date,
+                ROWS_LOADED: rowsLoaded
+            });
+        });
+
+        // OBS_CREDITS_BY_WAREHOUSE
+        this.data.creditsByWarehouse = [];
+        const warehouses = ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH', 'AD4_DEMO_SMALL_INDEX'];
+        dates.forEach(date => {
+            warehouses.forEach(warehouse => {
+                if (Math.random() > 0.3) { // Some warehouses don't run every day
+                    this.data.creditsByWarehouse.push({
+                        WAREHOUSE_NAME: warehouse,
+                        USAGE_DATE: date,
+                        CREDITS: Math.random() * 10 + 1,
+                        SPEND_USD: Math.random() * 10 + 1
+                    });
+                }
+            });
+        });
+
+        // OBS_IDLE_ACTIVE_RATIO
+        this.data.idleActiveRatio = warehouses.map(warehouse => ({
+            WAREHOUSE_NAME: warehouse,
+            AVG_RUNNING_LOAD: Math.random() * 0.1,
+            AVG_QUEUED_LOAD: Math.random() * 0.01,
+            ACTIVE_PCT: Math.random() * 0.3 + 0.7,
+            QUEUED_PCT: Math.random() * 0.1
+        }));
+
+        // OBS_QUERY_PERFORMANCE
+        this.data.queryPerformance = dates.map(date => ({
+            USAGE_DATE: date,
+            P95_EXEC_SEC: Math.random() * 1 + 0.2,
+            AVG_EXEC_SEC: Math.random() * 0.1 + 0.02
+        }));
+
+        // OBS_QUERY_FAILURE_RATE
+        this.data.queryFailureRate = dates.map(date => {
+            const totalQueries = Math.floor(Math.random() * 20000) + 30000;
+            const failedQueries = Math.floor(totalQueries * (Math.random() * 0.02 + 0.005));
+            return {
+                USAGE_DATE: date,
+                FAILED_QUERIES: failedQueries,
+                TOTAL_QUERIES: totalQueries,
+                FAILURE_RATE: failedQueries / totalQueries
+            };
+        });
+
+        // OBS_WAREHOUSE_EVENTS
+        this.data.warehouseEvents = [];
+        dates.forEach(date => {
+            warehouses.forEach(warehouse => {
+                const eventsCount = Math.floor(Math.random() * 5);
+                for (let i = 0; i < eventsCount; i++) {
+                    const eventTime = new Date(date.getTime() + Math.random() * 24 * 60 * 60 * 1000);
+                    this.data.warehouseEvents.push({
+                        EVENT_TS: eventTime,
+                        WAREHOUSE_NAME: warehouse,
+                        EVENT_NAME: ['SUSPEND_WAREHOUSE', 'RESUME_WAREHOUSE', 'RESIZE_WAREHOUSE'][Math.floor(Math.random() * 3)],
+                        EVENT_REASON: ['WAREHOUSE_AUTOSUSPEND', 'WAREHOUSE_AUTORESUME', 'USER_REQUEST'][Math.floor(Math.random() * 3)],
+                        EVENT_STATE: 'STARTED'
+                    });
+                }
+            });
+        });
+
+        // OBS_DOMO_CONNECTOR_HEALTH
+        const connectors = this.mockDatasets.slice(0, 6);
+        this.data.connectorHealth = [];
+        dates.forEach(date => {
+            connectors.forEach(connector => {
+                this.data.connectorHealth.push({
+                    RUN_DATE: date,
+                    CONNECTOR: connector,
+                    SUCCESS_PCT: Math.random() * 0.1 + 0.9,
+                    SLA_BREACHES: Math.floor(Math.random() * 10),
+                    AVG_RUNTIME_SEC: Math.random() * 3600 + 30
+                });
+            });
+        });
+
+        // OBS_DOMO_DATA_FRESHNESS
+        this.data.dataFreshness = this.mockDatasets.slice(0, 6).map(n => ({ DATASET: n, HOURS_SINCE_LAST_RUN: Math.floor(Math.random() * 72) }));
+
+        // OBS_RECORD_FRESHNESS (per-day source → warehouse lag by dataset)
+        const freshnessDatasets = this.data.dataFreshness.map(d => d.DATASET);
+        this.data.recordFreshness = [];
+        dates.forEach(date => {
+            freshnessDatasets.forEach(ds => {
+                const hoursBehind = Math.max(0, Math.round(Math.random() * 72));
+                const sourceTs = new Date(date.getTime() - hoursBehind * 60 * 60 * 1000);
+                this.data.recordFreshness.push({
+                    DATASET: ds,
+                    AS_OF_DATE: date,
+                    MAX_SOURCE_TS: sourceTs,
+                    HOURS_BEHIND_NOW: hoursBehind
+                });
+            });
+        });
+
+
+
+        // OBS_DATASET_CREDIT_COST
+        this.data.datasetCreditCost = this.mockDatasets.slice(0, 10).map(name => ({
+            DATASET_NAME: name,
+            CREDITS: +(Math.random() * 1.5 + 0.01).toFixed(5),
+            COST_USD: +(Math.random() * 1.5 + 0.01).toFixed(5)
+        }));
+
+        // OBS_COST_VS_UTILIZATION - using same dataset names as cost data
+        this.data.costVsUtilization = this.mockDatasets.slice(0, 12).map(dataset => {
+            const baseRuns = Math.floor(Math.random() * 50) + 10;
+            const baseCost = Math.random() * 15 + 0.5;
+            const baseBytesGB = Math.random() * 500 + 10;
+            const successPct = Math.random() * 30 + 70; // 70-100% success rate
+            
+            return {
+                DATASET: dataset,
+                COST_USD: parseFloat(baseCost.toFixed(2)),
+                BYTES_LOADED: Math.floor(baseBytesGB * 1e9), // Convert GB to bytes
+                RUNS: baseRuns,
+                SUCCESS_PCT: parseFloat(successPct.toFixed(1))
+            };
+        });
+
+        // OBS_SNOWFLAKE_WAU
+        this.data.snowflakeWAU = [
+            { ISO_WEEK: 'I25Y-IW26', WAU: 182 },
+            { ISO_WEEK: 'I25Y-IW27', WAU: 195 },
+            { ISO_WEEK: 'I25Y-IW28', WAU: 203 },
+            { ISO_WEEK: 'I25Y-IW29', WAU: 198 },
+            { ISO_WEEK: 'I25Y-IW30', WAU: 215 },
+            { ISO_WEEK: 'I25Y-IW31', WAU: 229 },
+            { ISO_WEEK: 'I25Y-IW32', WAU: 248 },
+            { ISO_WEEK: 'I25Y-IW33', WAU: 267 }
+        ];
+
+        // OBS_DOMO_DAILY_BYTES
+        this.data.dailyBytes = dates.map(date => ({
+            RUN_DATE: date,
+            AVG_BYTES_INSERTED: Math.random() * 500000 + 800000
+        }));
+
+        // OBS_DOMO_API_ZSCORE - more realistic anomaly patterns
+        this.data.apiZscore = dates.map((date, index) => {
+            // Most values are in normal range (-2 to +2)
+            let zscore = (Math.random() - 0.5) * 4;
+            
+            // Inject some anomalies (8% chance)
+            if (Math.random() < 0.08) {
+                zscore = (Math.random() > 0.5 ? 1 : -1) * (2.5 + Math.random() * 2.5);
+            }
+            
+            // Base API calls with some variation
+            const baseApiCalls = 2800 + (Math.sin(index * 0.15) * 400);
+            const apiCalls = Math.max(1000, Math.round(baseApiCalls + zscore * 200));
+            
+            return {
+            RUN_DATE: date,
+                API_CALLS: apiCalls,
+                ZSCORE: parseFloat(zscore.toFixed(2))
+            };
+        });
+
+        // OBS_DOMO_CONNECTOR_RUNS (with derived metrics for slowest runs table)
+        this.data.connectorRuns = [];
+        dates.forEach(date => {
+            connectors.forEach(connector => {
+                const runsCount = Math.floor(Math.random() * 5) + 1;
+                for (let i = 0; i < runsCount; i++) {
+                    const hh = Math.floor(Math.random() * 1); // keep under an hour for realism
+                    const mm = Math.floor(Math.random() * 59);
+                    const ss = Math.floor(Math.random() * 59);
+                    const runTime = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+                    const totalSeconds = hh * 3600 + mm * 60 + ss || Math.floor(Math.random() * 300) + 60;
+                    const updatedRows = Math.floor(Math.random() * 20000) + 200;
+                    const bytesInserted = Math.floor(Math.random() * 5_000_000) + 50_000;
+                    this.data.connectorRuns.push({
+                        'Data Source Name': connector,
+                        Status: Math.random() > 0.05 ? 'SUCCESS' : 'FAILURE',
+                        'Updated Rows': updatedRows,
+                        'Bytes Inserted': bytesInserted,
+                        'Total API Calls': Math.floor(Math.random() * 50) + 5,
+                        'Created At': date,
+                        'Run Time': runTime,
+                        'Run Time Seconds': totalSeconds,
+                        'Rows Per Second': +(updatedRows / totalSeconds).toFixed(2),
+                        'Bytes Per Second': +(bytesInserted / totalSeconds).toFixed(2),
+                        'Start Time': new Date(date.getTime() - totalSeconds * 1000)
+                    });
+                }
+            });
+        });
+
+        // OBS_QUERY_HISTORY_LTD
+        this.data.queryHistory = [];
+        const queryTypes = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'ALTER_SESSION', 'CREATE'];
+        const databases = ['DOMO', 'COBRA_DEMO_DB', 'TEST_DB', 'INTEGRATIONTESTS', 'CLOUD_DATATRANSFORM_DEV3'];
+        const queryWarehouses = ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH'];
+        
+        for (let i = 0; i < 2000; i++) {
+            const queryId = `01bb${Math.random().toString(36).substr(2, 4)}-0613-${Math.random().toString(36).substr(2, 4)}-0000-ad0d3e${Math.random().toString(36).substr(2, 6)}`;
+            const queryType = queryTypes[Math.floor(Math.random() * queryTypes.length)];
+            const database = databases[Math.floor(Math.random() * databases.length)];
+            const warehouse = queryWarehouses[Math.floor(Math.random() * queryWarehouses.length)];
+            
+            let queryText = '';
+            switch (queryType) {
+                case 'SELECT':
+                    queryText = `SELECT * FROM "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}"`;
+                    break;
+                case 'INSERT':
+                    queryText = `INSERT INTO "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" VALUES (...)`;
+                    break;
+                case 'UPDATE':
+                    queryText = `UPDATE "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" SET column = value`;
+                    break;
+                case 'DELETE':
+                    queryText = `DELETE FROM "${database}"."SCHEMA"."TABLE_${Math.floor(Math.random() * 100)}" WHERE condition`;
+                    break;
+                case 'ALTER_SESSION':
+                    queryText = 'ALTER SESSION SET QUERY_TAG = \'{"source":"domo"}\'';
+                    break;
+                case 'CREATE':
+                    queryText = `CREATE TABLE "${database}"."SCHEMA"."NEW_TABLE_${Math.floor(Math.random() * 100)}" AS SELECT...`;
+                    break;
+            }
+
+            this.data.queryHistory.push({
+                QUERY_ID: queryId,
+                QUERY_TEXT: queryText,
+                DATABASE_NAME: database,
+                QUERY_TYPE: queryType,
+                WAREHOUSE_NAME: warehouse,
+                QUERY_TAG: Math.random() > 0.7 ? `{"datasourceId":"${Math.random().toString(36)}","source":"domo","userId":"${Math.floor(Math.random() * 1000000000)}"}` : null,
+                TOTAL_ELAPSED_TIME: Math.floor(this.exponentialRandom() * 5000) + 10 // Exponential distribution for realistic query times
+            });
+        }
+
+        // Sort by elapsed time for better visualization
+        this.data.queryHistory.sort((a, b) => b.TOTAL_ELAPSED_TIME - a.TOTAL_ELAPSED_TIME);
+    }
+
+    generateQueryRewriteData() {
+        const queryTemplates = [
+            {
+                orig: `select 
+    table_catalog,
+    table_schema,
+    table_name,
+    row_count,
+    to_timestamp(convert_timezone('utc', last_altered)) as last_altered,
+    table_type
+from "sample_datashare_database".information_schema.tables
+where 
+    (
+        is_transient = 'no'
+        or is_transient is null
+    )
+    and table_type in ('base table', 'view', 'materialized view')
+    and table_schema = 'linkup'
+    and table_name in (
+        'core_ticker_analytics', 'pit_company_reference', 'onet_taxonomy_2019',
+        'core_company_analytics', 'job_descriptions', 'job_records', 'company_ticker_reference',
+        'company_scrape_log'
+    )`,
+                rewrite: `SELECT 
+    table_catalog,
+    table_schema,
+    table_name,
+    row_count,
+    TO_TIMESTAMP(CONVERT_TIMEZONE('UTC', last_altered)) AS last_altered,
+    table_type
+FROM "sample_datashare_database".information_schema.tables
+WHERE (is_transient = 'NO' OR is_transient IS NULL)
+    AND table_type IN ('BASE TABLE', 'VIEW', 'MATERIALIZED VIEW')
+    AND table_schema = 'LINKUP'
+    AND table_name IN (
+        'CORE_TICKER_ANALYTICS',
+        'PIT_COMPANY_REFERENCE',
+        'ONET_TAXONOMY_2019',
+        'CORE_COMPANY_ANALYTICS',
+        'JOB_DESCRIPTIONS',
+        'JOB_RECORDS',
+        'COMPANY_TICKER_REFERENCE',
+        'COMPANY_SCRAPE_LOG'
+    )
+WITH MATERIALIZED VIEW`,
+                rationale: "Optimized query structure with proper formatting, uppercase keywords, and added MATERIALIZED VIEW hint for frequently accessed metadata queries. Improved readability and performance."
+            },
+            {
+                orig: `select 
+    date_trunc(?, convert_timezone(?, start_time)) as start_time,
+    entity_id,
+    name,
+    service_type,
+    sum(credits_used) as credits_used,
+    sum(credits_used_compute) as credits_compute,
+    sum(credits_used_cloud_services) as credits_cloud
+from 
+    snowflake.account_usage.metering_history
+where
+    start_time >= convert_timezone(?, ?, to_timestamp_ltz(?, 'auto'))
+    and start_time < convert_timezone(?, ?, to_timestamp_ltz(?, 'auto'))
+group by 
+    1, 2, 3, 4`,
+                rewrite: `SELECT 
+    DATE_TRUNC(?, CONVERT_TIMEZONE(?, start_time)) AS start_time,
+    entity_id,
+    name,
+    service_type,
+    SUM(credits_used) AS credits_used,
+    SUM(credits_used_compute) AS credits_compute,
+    SUM(credits_used_cloud_services) AS credits_cloud
+FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_HISTORY
+WHERE start_time >= CONVERT_TIMEZONE(?, ?, TO_TIMESTAMP_LTZ(?, 'AUTO'))
+    AND start_time < CONVERT_TIMEZONE(?, ?, TO_TIMESTAMP_LTZ(?, 'AUTO'))
+GROUP BY 1, 2, 3, 4
+WITH RESULT_CACHE`,
+                rationale: "Enhanced with proper SQL formatting, uppercase keywords, and result caching for frequently accessed account usage data. Improved query plan efficiency and readability."
+            },
+            {
+                orig: `select 
+    *
+from 
+    "sample_datashare_database".public.diamonds
+where 
+    price > 5000
+    and carat > 1.0
+    and cut = 'premium'
+order by price desc
+limit 100`,
+                rewrite: `SELECT 
+    carat,
+    cut,
+    color,
+    clarity,
+    depth,
+    table_pct,
+    price,
+    x,
+    y,
+    z
+FROM "sample_datashare_database".public.diamonds
+WHERE price > 5000 
+    AND carat > 1.0 
+    AND cut = 'PREMIUM'
+ORDER BY price DESC
+LIMIT 100`,
+                rationale: "Replaced SELECT * with explicit column selection to reduce data transfer and improve performance. Added proper formatting with uppercase keywords and optimized WHERE clause structure."
+            },
+            {
+                orig: `select customer_id, order_date, total_amount from orders where order_date between '2024-01-01' and '2024-12-31' and status in ('completed', 'shipped') order by order_date`,
+                rewrite: `SELECT 
+    customer_id,
+    order_date,
+    total_amount
+FROM orders
+WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31'
+    AND status IN ('COMPLETED', 'SHIPPED')
+ORDER BY order_date
+WITH INDEX_HINT(idx_order_date_status)`,
+                rationale: "Improved formatting with proper indentation and uppercase keywords. Added index hint for better performance on date range and status filtering."
+            },
+            {
+                orig: `select count(*) as total_users, avg(age) as avg_age from users where created_date > dateadd(month, -6, current_date()) and country in ('usa', 'canada') group by country`,
+                rewrite: `SELECT 
+    country,
+    COUNT(*) AS total_users,
+    AVG(age) AS avg_age,
+    MEDIAN(age) AS median_age
+FROM users
+WHERE created_date > DATEADD(MONTH, -6, CURRENT_DATE())
+    AND country IN ('USA', 'CANADA')
+GROUP BY country
+ORDER BY total_users DESC`,
+                rationale: "Enhanced with better column organization, added median calculation for more comprehensive statistics, and proper sorting. Improved readability with uppercase keywords."
+            }
+        ];
+
+        this.queryRewriteResults = [];
+        
+        for (let i = 0; i < 47; i++) {
+            const template = queryTemplates[Math.floor(Math.random() * queryTemplates.length)];
+            const queryId = `01bb${Math.random().toString(36).substr(2, 4)}-0613-${Math.random().toString(36).substr(2, 4)}-0000-ad0d3e${Math.random().toString(36).substr(2, 6)}`;
+            
+            // Generate realistic performance metrics
+            const baseMs = Math.floor(Math.random() * 15000) + 500; // 500ms to 15.5s
+            const improvementFactor = Math.random() * 0.7 + 0.1; // 10% to 80% improvement
+            const testMs = Math.floor(baseMs * (1 - improvementFactor));
+            const pctMs = parseFloat(((baseMs - testMs) / baseMs * 100).toFixed(1));
+            
+            const baseBytes = Math.floor(Math.random() * 500000000) + 10000; // 10KB to 500MB
+            const bytesImprovementFactor = Math.random() * 0.6 + 0.1; // 10% to 70% improvement
+            const testBytes = Math.floor(baseBytes * (1 - bytesImprovementFactor));
+            const pctBytes = parseFloat(((baseBytes - testBytes) / baseBytes * 100).toFixed(1));
+            
+            // Generate credits and savings
+            const testCreditsCloud = parseFloat((Math.random() * 2 + 0.1).toFixed(6));
+            const estUsdSavings = parseFloat((testCreditsCloud * pctMs / 100).toFixed(2));
+            
+            // Determine action based on improvement
+            let action;
+            if (pctMs >= 25) action = 'ADOPT';
+            else if (pctMs >= 5) action = 'BENCH_TEST';
+            else action = 'IGNORE';
+            
+            const runDate = new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000); // Last 7 days
+            
+            this.queryRewriteResults.push({
+                QUERY_ID: queryId,
+                ORIG_SQL: template.orig,
+                REWRITE_SQL: template.rewrite,
+                BASE_MS: baseMs,
+                TEST_MS: testMs,
+                PCT_MS: pctMs,
+                BASE_BYTES: baseBytes,
+                TEST_BYTES: testBytes,
+                PCT_BYTES: pctBytes,
+                SCORE: parseFloat((pctMs * 0.7 + pctBytes * 0.3).toFixed(1)),
+                ACTION: action,
+                RUN_DTS: runDate.toISOString(),
+                START_TIME: runDate.toISOString(),
+                WAREHOUSE_NAME: ['DOMO_SINGLE_NODE', 'DOMO_WRITEBACK_WAREHOUSE', 'SALES_INTELLIGENCE_WH'][Math.floor(Math.random() * 3)],
+                USER_NAME: ['analyst@example.com', 'developer@example.com', 'admin@example.com'][Math.floor(Math.random() * 3)],
+                BASE_ELAPSED_MS: baseMs,
+                BASE_BYTES_SCANNED: baseBytes,
+                LLM_RATIONALE: template.rationale,
+                LLM_EST_ELAPSED_PCT: Math.floor(pctMs),
+                LLM_EST_BYTES_PCT: Math.floor(pctBytes),
+                LLM_RISKS: "Low risk optimization. No functional changes to query logic. Thoroughly tested for compatibility.",
+                TEST_ELAPSED_MS: testMs,
+                TEST_BYTES_SCANNED: testBytes,
+                TEST_CREDITS_CLOUD: testCreditsCloud,
+                PCT_ELAPSED_IMPR: pctMs,
+                PCT_BYTES_IMPR: pctBytes,
+                USD_PER_CREDIT: 1,
+                EST_USD_SAVINGS: estUsdSavings,
+                DECISION: action === 'ADOPT' ? 'RECOMMENDED' : action === 'BENCH_TEST' ? 'EVALUATE' : 'SKIP',
+                ERROR_MSG: null,
+                PCT_CREDITS_IMPR: pctMs
+            });
+        }
+        
+        // Sort by improvement descending
+        this.queryRewriteResults.sort((a, b) => b.PCT_MS - a.PCT_MS);
+        this.filteredQueries = [...this.queryRewriteResults];
+    }
+
+    async loadLiveData() {
+        if (typeof domo === 'undefined') {
+            console.warn('Domo SDK not available');
+            return;
+        }
+
+        try {
+            const promises = Object.entries(this.datasetAliases).map(async ([key, alias]) => {
+                try {
+                    const rows = await domo.get(`/data/v1/${alias}`);
+                    // Data fetched successfully
+                    return [key, rows];
+                } catch (error) {
+                    console.error(`Error fetching ${key}:`, error);
+                    return [key, []];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            
+            results.forEach(([key, data]) => {
+                switch(key) {
+                    case 'OBS_COST_PER_CREDIT':
+                        this.data.costPerCredit = data;
+                        break;
+                    case 'OBS_CREDITS_BY_WAREHOUSE':
+                        this.data.creditsByWarehouse = data;
+                        break;
+                    case 'OBS_IDLE_ACTIVE_RATIO':
+                        this.data.idleActiveRatio = data;
+                        break;
+                    case 'OBS_QUERY_PERFORMANCE':
+                        this.data.queryPerformance = data;
+                        break;
+                    case 'OBS_QUERY_FAILURE_RATE':
+                        this.data.queryFailureRate = data;
+                        break;
+                    case 'OBS_WAREHOUSE_EVENTS':
+                        this.data.warehouseEvents = data;
+                        break;
+                    case 'OBS_DOMO_CONNECTOR_HEALTH':
+                        this.data.connectorHealth = data;
+                        break;
+                    case 'OBS_DOMO_DATA_FRESHNESS':
+                        this.data.dataFreshness = data;
+                        break;
+                    case 'OBS_DATASET_CREDIT_COST':
+                        this.data.datasetCreditCost = data;
+                        break;
+                    case 'OBS_SNOWFLAKE_WAU':
+                        this.data.snowflakeWAU = data;
+                        break;
+                    case 'OBS_DOMO_DAILY_BYTES':
+                        this.data.dailyBytes = data;
+                        break;
+                    case 'OBS_DOMO_API_ZSCORE':
+                        this.data.apiZscore = data;
+                        break;
+                    case 'OBS_DOMO_CONNECTOR_RUNS':
+                        this.data.connectorRuns = data;
+                        break;
+                    case 'OBS_QUERY_HISTORY_LTD':
+                        this.data.queryHistory = data;
+                        break;
+                    case 'QUERY_REWRITE_RESULTS':
+                        this.queryRewriteResults = data;
+                        this.filteredQueries = [...data];
+                        break;
+                    case 'OBS_COST_VS_UTILIZATION':
+                        this.data.costVsUtilization = data;
+                        break;
+                }
+            });
+
+        } catch (error) {
+            console.error('Error loading live data:', error);
+        }
+    }
+
+    async toggleDataMode() {
+        const button = document.getElementById('dataToggle');
+        const modeIndicator = document.getElementById('dataMode');
+        button.classList.add('loading');
+        
+        if (this.isLiveMode) {
+            this.isLiveMode = false;
+            button.textContent = 'Switch to Live';
+            modeIndicator.textContent = 'Mock Data';
+            modeIndicator.className = 'px-2 py-1 rounded-full text-xs font-medium bg-orange-500 text-white';
+            this.generateMockData();
+            this.generateQueryRewriteData();
+        } else {
+            this.isLiveMode = true;
+            button.textContent = 'Switch to Mock';
+            modeIndicator.textContent = 'Live Data';
+            modeIndicator.className = 'px-2 py-1 rounded-full text-xs font-medium bg-green-500 text-white';
+            await this.loadLiveData();
+        }
+        
+        button.classList.remove('loading');
+        this.renderDashboard();
+        this.generateAlerts();
+        this.filterQueries();
+    }
+
+    async refreshData() {
+        if (this.isLiveMode) {
+            await this.loadLiveData();
+        } else {
+            this.generateMockData();
+            this.generateQueryRewriteData();
+        }
+        this.renderDashboard();
+        this.generateAlerts();
+        this.filterQueries();
+    }
+
+    switchTab(tabName) {
+        // Update navigation buttons
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+
+        // Ensure the content area scrolls to the top when switching tabs
+        const scrollContainer = document.querySelector('main .flex-1.overflow-auto');
+        if (scrollContainer) {
+            scrollContainer.scrollTop = 0;
+        }
+
+        // Update page title and description
+        const titles = {
+            'cost': {
+                title: 'Cost & Credits',
+                description: 'Monitor spend patterns and resource utilization'
+            },
+            'performance': {
+                title: 'Performance & Reliability',
+                description: 'Track query performance and system reliability metrics'
+            },
+            'pipeline': {
+                title: 'Pipeline Health',
+                description: 'Monitor connector performance and data freshness'
+            },
+            'adoption': {
+                title: 'Adoption & Utilization',
+                description: 'Analyze user engagement and platform adoption'
+            },
+            'optimization': {
+                title: 'AI Query Optimization',
+                description: 'Leverage Claude 4 Sonnet to optimize query performance and reduce costs'
+            },
+            'quality': {
+                title: 'Data Quality',
+                description: 'Monitor data completeness, accuracy, and consistency across pipelines'
+            }
+        };
+
+        const pageTitle = document.getElementById('pageTitle');
+        const pageDescription = pageTitle.nextElementSibling;
+        if (pageDescription) {
+            pageDescription.classList.add('page-subtitle');
+        }
+        
+        if (titles[tabName]) {
+            pageTitle.textContent = titles[tabName].title;
+            pageDescription.textContent = titles[tabName].description;
+        }
+
+        // Render charts for the active tab
+        this.renderTabCharts(tabName);
+    }
+
+    // Initialize Monaco Editor
+    async initializeMonacoEditor() {
+        if (typeof require !== 'undefined') {
+            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs' } });
+            
+            require(['vs/editor/editor.main'], () => {
+                // Monaco is loaded and ready
+                // Monaco Editor loaded
+            });
+        }
+    }
+
+    // Create Monaco Editor instance with professional configuration
+    createMonacoEditor(container, value, isReadOnly = false) {
+        if (typeof monaco === 'undefined') {
+            // Fallback to simple textarea if Monaco isn't available
+            const textarea = document.createElement('textarea');
+            textarea.value = this.formatSQL(value);
+            textarea.readOnly = isReadOnly;
+            textarea.className = 'w-full h-full font-mono border-0 resize-none focus:outline-none';
+            textarea.style.backgroundColor = isReadOnly ? '#f9fafb' : '#22262e';
+            textarea.style.color = isReadOnly ? '#374151' : '#d4d4d4';
+            textarea.style.fontSize = '10px';
+            textarea.style.lineHeight = '1.3';
+            textarea.style.padding = '12px';
+            textarea.style.height = '280px';
+            textarea.style.fontFamily = 'JetBrains Mono, Fira Code, Monaco, Consolas, monospace';
+            container.appendChild(textarea);
+            return {
+                getValue: () => textarea.value,
+                setValue: (val) => { textarea.value = this.formatSQL(val); },
+                dispose: () => { textarea.remove(); },
+                getAction: (id) => ({ run: () => {} })
+            };
+        }
+
+        const formattedValue = this.formatSQL(value);
+        
+        // Create custom theme for the editor
+        monaco.editor.defineTheme('customDark', {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+                { token: 'keyword.sql', foreground: 'd8c462' },
+                { token: 'string.sql', foreground: '7ebc65' },
+                { token: 'comment', foreground: '6b7280' },
+                { token: 'number', foreground: 'd02666' },
+                { token: 'operator.sql', foreground: '00bda3' },
+                { token: 'identifier', foreground: 'ffffff' },
+                { token: 'delimiter', foreground: '9841b6' }
+            ],
+            colors: {
+                'editor.background': '#1f2937',
+                'editor.foreground': '#f9fafb',
+                'editor.lineHighlightBackground': '#374151',
+                'editor.selectionBackground': '#4f46e5',
+                'editorCursor.foreground': '#a855f7',
+                'editorLineNumber.foreground': '#6b7280',
+                'editorLineNumber.activeForeground': '#a855f7'
+            }
+        });
+        
+        const editor = monaco.editor.create(container, {
+            value: formattedValue,
+            language: 'sql',
+            theme: isReadOnly ? (this.isDarkMode ? 'vs-dark' : 'vs') : 'customDark',
+            readOnly: isReadOnly,
+            minimap: { 
+                enabled: false
+            },
+            scrollBeyondLastLine: false,
+            wordWrap: 'on',
+            lineNumbers: 'on',
+            fontSize: 13,
+            lineHeight: 16,
+            fontFamily: 'JetBrains Mono, Fira Code, Monaco, Consolas, monospace',
+            fontLigatures: true,
+            cursorBlinking: 'smooth',
+            cursorSmoothCaretAnimation: true,
+            smoothScrolling: true,
+            folding: true,
+            foldingStrategy: 'indentation',
+            showFoldingControls: 'always',
+            unfoldOnClickAfterEndOfLine: true,
+            contextmenu: true,
+            mouseWheelZoom: true,
+            quickSuggestions: {
+                other: true,
+                comments: false,
+                strings: false
+            },
+            parameterHints: {
+                enabled: true,
+                cycle: true
+            },
+            suggestOnTriggerCharacters: true,
+            acceptSuggestionOnEnter: 'on',
+            tabCompletion: 'on',
+            wordBasedSuggestions: true,
+            snippetSuggestions: 'inline',
+            selectOnLineNumbers: true,
+            roundedSelection: false,
+            renderWhitespace: 'selection',
+            renderControlCharacters: false,
+            renderIndentGuides: true,
+            renderLineHighlight: 'line',
+            codeLens: true,
+            hideCursorInOverviewRuler: false,
+            scrollbar: {
+                useShadows: false,
+                verticalHasArrows: false,
+                horizontalHasArrows: false,
+                vertical: 'visible',
+                horizontal: 'visible',
+                verticalScrollbarSize: 6,
+                horizontalScrollbarSize: 6,
+                arrowSize: 30
+            },
+            padding: {
+                top: 24,
+                bottom: 8
+            }
+        });
+
+        // Set the container height
+        container.style.height = '280px';
+        editor.layout();
+
+        // Add format document command
+        editor.addAction({
+            id: 'format-sql',
+            label: 'Format SQL',
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF],
+            precondition: null,
+            keybindingContext: null,
+            contextMenuGroupId: 'modification',
+            contextMenuOrder: 1.5,
+            run: (ed) => {
+                const currentValue = ed.getValue();
+                const formatted = this.formatSQL(currentValue);
+                ed.setValue(formatted);
+            }
+        });
+
+        return editor;
+    }
+
+    // Bee Swarm Chart Implementation
+    createBeeSwarm(data, options) {
+        if (typeof Plot === 'undefined' || typeof d3 === 'undefined') {
+            console.warn('Plot or d3 not available for bee swarm chart');
+            return null;
+        }
+
+        try {
+            const gap = options.gap != null ? options.gap : 1;
+            // Use a sensible default when ticks is 0/undefined/null
+	            const ticks = (options.ticks === undefined || options.ticks === null || options.ticks <= 0) ? 160 : options.ticks;
+            
+            const dots = Plot.dot(data, options);
+            const render = dots.render;
+            const self = this;
+            
+            dots.render = function () {
+                const g = render.apply(this, arguments);
+                const circles = d3.select(g).selectAll("circle");
+                circles.attr('class', 'point');
+
+                const nodes = [];
+                // Compute vertical center in plot coordinates so swarm sits in the middle of the chart
+                const totalHeight = options.chartHeight != null ? options.chartHeight : 300;
+                const mTop = options.marginTop != null ? options.marginTop : 20;
+                const mBottom = options.marginBottom != null ? options.marginBottom : 60;
+                const innerHeight = Math.max(0, totalHeight - mTop - mBottom);
+                const centerY = mTop + innerHeight / 2;
+                // Default to true beeswarm along x (spread vertically to avoid overlap)
+                const direction = options.direction === 'y' ? 'y' : 'x';
+                const [cx, cy, x, y, forceX, forceY] =
+                    direction === "x"
+                        ? ["cx", "cy", "x", "y", d3.forceX, d3.forceY]
+                        : ["cy", "cx", "y", "x", d3.forceY, d3.forceX];
+                        
+	                // Helper to generate a mild gaussian-like jitter for a rounder appearance
+	                const jitterPx = (options.initialJitter != null) ? options.initialJitter : 10;
+	                const randNorm = () => {
+	                    // Sum of 3 uniforms to approximate normal (mean 0, range about [-1.5, 1.5])
+	                    return (Math.random() + Math.random() + Math.random() - 1.5);
+	                };
+	                for (const c of circles) {
+	                    // Seed vertical jitter so the simulation does not start fully colinear
+	                    const jitter = randNorm() * jitterPx;
+                    nodes.push({
+                        x: +c.getAttribute(cx),
+                        y: (+c.getAttribute(cy) || centerY) + jitter,
+                        r: +c.getAttribute("r")
+                    });
+                }
+                
+	                // Compute relaxed positions using a force simulation
+	                const applyPositions = (useAnimation) => {
+	                    if (useAnimation) {
+	                        circles
+	                            .transition()
+	                            .duration(options.animationDuration != null ? options.animationDuration : 5000)
+	                            .ease(d3.easeCubicOut)
+	                            .attr(cx, (_, i) => nodes[i].x)
+	                            .attr(cy, (_, i) => nodes[i].y);
+	                    } else {
+	                        circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+	                    }
+	                };
+
+	                const force = d3
+	                    .forceSimulation(nodes)
+	                    .force("x", forceX((d) => d[x]).strength(options.xStrength != null ? options.xStrength : 0.8))
+	                    .force("y", forceY(centerY).strength(options.verticalStrength != null ? options.verticalStrength : 0.08))
+	                    .force("repel", d3.forceManyBody().strength(options.repelStrength != null ? options.repelStrength : -3))
+	                    .force(
+	                        "collide",
+	                        d3.forceCollide()
+	                            .radius((d) => d.r + gap)
+	                            .iterations(5)
+	                    )
+	                    .tick(ticks)
+	                    .stop();
+
+	                // Apply final positions; animate on initial load if requested
+	                applyPositions(options.animateOnLoad === true);
+
+	                if (options.dynamic) {
+	                    // For dynamic mode, let the simulation run and update positions continuously
+	                    const update = () => circles.attr(cx, (_, i) => nodes[i].x).attr(cy, (_, i) => nodes[i].y);
+	                    force.on("tick", update).restart();
+	                }
+                
+                circles.on("click", function(ev, index) {
+                    self.selectQueryPoint(ev, data[index], circles);
+                });
+
+                // Don't auto-select first point - wait for user interaction
+                
+                return g;
+            };
+            
+            return dots;
+        } catch (error) {
+            console.error('Error in createBeeSwarm:', error);
+            return null;
+        }
+    }
+
+    selectQueryPoint(ev, row, circles) {
+        const selectedClass = 'selected';
+        const point = ev.target;
+        const pointSize = 4;
+        
+        // Remove selection from all points
+        circles.each(function() {
+            this.classList.remove(selectedClass);
+            this.setAttribute('r', pointSize);
+        });
+        
+        // Select current point
+        point.classList.add(selectedClass);
+        point.setAttribute('r', pointSize * 1.5);
+        point.parentElement.appendChild(point);
+
+        this.showQueryDetails(row);
+    }
+
+    showQueryDetails(queryData) {
+        if (this.useInlineSwarmPanel) {
+            const panel = document.getElementById('querySwarmPanel');
+            if (!panel) return;
+            panel.classList.remove('hidden');
+            panel.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-center justify-between mb-2';
+            const title = document.createElement('h4');
+            title.className = 'text-sm font-semibold text-gray-900';
+            title.textContent = 'Query details';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'text-gray-400 hover:text-gray-600';
+            closeBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+            closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            panel.appendChild(header);
+
+            const fields = [
+                { label: 'Query ID', value: queryData.QUERY_ID },
+                { label: 'Execution Time', value: `${queryData.TOTAL_ELAPSED_TIME}ms` },
+                { label: 'Query Type', value: queryData.QUERY_TYPE },
+                { label: 'Database', value: queryData.DATABASE_NAME },
+                { label: 'Warehouse', value: queryData.WAREHOUSE_NAME },
+                { label: 'SQL text', value: queryData.QUERY_TEXT, code: true }
+            ];
+
+            fields.forEach(f => {
+                const wrap = document.createElement('div');
+                wrap.className = 'mb-3';
+                const lab = document.createElement('div');
+                lab.className = 'text-[11px] font-semibold text-gray-500 mb-1';
+                lab.textContent = f.label;
+                const val = document.createElement('div');
+                if (f.code) {
+                    val.className = 'text-xs text-gray-800 bg-gray-50 border border-gray-200 p-2 rounded font-mono whitespace-pre-wrap break-words overflow-x-auto';
+                    val.style.maxHeight = '180px';
+                    val.style.overflowY = 'auto';
+                } else {
+                    val.className = 'text-sm text-gray-900';
+                }
+                val.textContent = f.value || 'N/A';
+                wrap.appendChild(lab);
+                wrap.appendChild(val);
+                panel.appendChild(wrap);
+            });
+            // Trim extra bottom whitespace on the final block
+            if (panel.lastElementChild) {
+                panel.lastElementChild.style.marginBottom = '0px';
+            }
+            return;
+        }
+
+        // Fallback to modal
+        const modal = document.getElementById('queryModal');
+        const detailsContainer = document.getElementById('queryDetails');
+        detailsContainer.innerHTML = '';
+        const details = [
+            { label: 'Query ID', value: queryData.QUERY_ID },
+            { label: 'Execution Time', value: `${queryData.TOTAL_ELAPSED_TIME}ms` },
+            { label: 'Query Type', value: queryData.QUERY_TYPE },
+            { label: 'Database', value: queryData.DATABASE_NAME },
+            { label: 'Warehouse', value: queryData.WAREHOUSE_NAME },
+            { label: 'Query Text', value: queryData.QUERY_TEXT }
+        ];
+        details.forEach(detail => {
+            const detailDiv = document.createElement('div');
+            detailDiv.className = 'mb-4';
+            const label = document.createElement('label');
+            label.className = 'block text-sm font-semibold text-gray-700 mb-1';
+            label.textContent = detail.label;
+            const value = document.createElement('div');
+            if (detail.label === 'Query Text') {
+                value.className = 'text-sm text-gray-900 bg-gray-50 p-3 rounded-lg font-mono max-h-32 overflow-y-auto break-words overflow-x-auto';
+            } else {
+                value.className = 'text-sm text-gray-900';
+            }
+            value.textContent = detail.value || 'N/A';
+            detailDiv.appendChild(label);
+            detailDiv.appendChild(value);
+            detailsContainer.appendChild(detailDiv);
+        });
+        modal.classList.remove('hidden');
+    }
+
+    closeModal() {
+        const modal = document.getElementById('queryModal');
+        modal.classList.add('hidden');
+    }
+
+    renderQuerySwarmChart() {
+        if (!this.data.queryHistory || this.data.queryHistory.length === 0) {
+            console.warn('No query history data available');
+            return;
+        }
+
+        // Check if required libraries are loaded
+        if (typeof Plot === 'undefined' || typeof d3 === 'undefined') {
+            console.warn('Plot or d3 libraries not loaded, skipping bee swarm chart');
+            const container = document.getElementById('querySwarmChart');
+            if (container) {
+                container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Chart libraries loading...</p></div>';
+            }
+            return;
+        }
+
+            const container = document.getElementById('querySwarmChart');
+        if (!container) return;
+            // Ensure the SVG content never bleeds outside the card
+            container.style.overflow = 'hidden';
+            // Ensure sufficient height to comfortably fit axes and points
+            const minHeight = 520;
+            const currentH = parseInt(getComputedStyle(container).height);
+            if (!isNaN(currentH) && currentH < minHeight) {
+                container.style.height = `${minHeight}px`;
+            }
+        
+        // Clear previous chart
+        container.innerHTML = '';
+        
+        // Prepare data for bee swarm (~<2000 mock queries)
+        const maxPoints = 2000;
+        const swarmData = this.data.queryHistory.slice(0, Math.min(this.data.queryHistory.length, maxPoints));
+        
+        try {
+            // Top mini-view: duration buckets (approximate histogram with Plot)
+            // Top histogram + metrics
+            const metricsEl = document.getElementById('totalQueriesIn30d');
+            const deltaEl = document.getElementById('totalQueriesDelta');
+            if (metricsEl) {
+                const now = new Date();
+                // Ensure START_TIME exists; if not, synthesize mock timestamps uniformly in last 60 days
+                const withTs = this.data.queryHistory.map((q) => {
+                    if (!q.START_TIME) {
+                        const daysBack = Math.floor(Math.random() * 60); // 0..59
+                        const ts = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
+                        return { ...q, START_TIME: ts.toISOString() };
+                    }
+                    return q;
+                });
+                // Replace only for display purposes; do not mutate original deep structure unnecessarily
+                const last30 = withTs.filter(q => new Date(q.START_TIME) >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)).length;
+                const prev30 = withTs.filter(q => {
+                    const t = new Date(q.START_TIME).getTime();
+                    const startPrev = now.getTime() - 60 * 24 * 60 * 60 * 1000;
+                    const endPrev = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+                    return t >= startPrev && t < endPrev;
+                }).length;
+                metricsEl.textContent = last30.toLocaleString();
+                if (deltaEl) {
+                    const change = prev30 > 0 ? ((last30 - prev30) / prev30) * 100 : 100;
+                    const sign = change >= 0 ? '↑' : '↓';
+                    const color = change >= 0 ? 'text-red-600' : 'text-green-600';
+                    deltaEl.className = `text-xs ${color}`;
+                    deltaEl.textContent = `${sign} ${Math.abs(change).toFixed(0)}% vs previous month`;
+                }
+            }
+            const topChart = document.getElementById('querySwarmTopChart');
+            if (topChart) {
+                topChart.innerHTML = '';
+                const allMin = d3.min(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                const allMax = d3.max(this.data.queryHistory, d => d.TOTAL_ELAPSED_TIME);
+                // Clip and slightly undershoot width to avoid fractional overflow
+                topChart.style.overflow = 'hidden';
+                const topWidthRaw = topChart.clientWidth || topChart.offsetWidth;
+                const topWidth = Math.max(0, Math.floor(topWidthRaw) - 2);
+	                const topPlot = Plot.plot({
+	                    height: 64,
+	                    width: topWidth,
+	                    marginLeft: 60,
+	                    marginRight: 60,
+                    x: { domain: [allMin, allMax], label: null, ticks: 0 },
+                    y: { ticks: 0 },
+                    marks: [
+                        Plot.rectY(
+                            Plot.binX({ y: 'count' }, { x: d => d.TOTAL_ELAPSED_TIME, thresholds: 50, domain: [allMin, allMax] }),
+                            { fill: '#9ED0F6' }
+                        )
+                    ]
+                });
+                topChart.appendChild(topPlot);
+            }
+
+            const chartHeight = (container.clientHeight || parseInt(getComputedStyle(container).height) || 520);
+            const chartWidthRaw = container.clientWidth || container.offsetWidth;
+            const chartWidth = Math.max(0, Math.floor(chartWidthRaw) - 2);
+            // Increase margins so the axis and tick labels do not overlap points
+            const chartMargins = { top: 20, right: 70, bottom: 80, left: 110 };
+// 1) Quantiles + helpers
+            const xv = d => d.TOTAL_ELAPSED_TIME;
+            const xs = swarmData.map(xv).sort(d3.ascending);
+            const q10 = d3.quantileSorted(xs, 0.10);
+            const q35 = d3.quantileSorted(xs, 0.35);  // left bulb → mid-left
+            const q60 = d3.quantileSorted(xs, 0.60);  // mid → just past the waist
+
+            const zone = d => {
+            const x = xv(d);
+            if (x <= q10) return 'leftDeep';
+            if (x <= q35) return 'left';
+            if (x <= q60) return 'waist';
+            return 'right';
+            };
+
+            // 2) SwarmWarehouse Cost Distribution
+            const beeSwarmMark = this.createBeeSwarm(swarmData, {
+            x: d => d.TOTAL_ELAPSED_TIME,
+            fill: d => d.TOTAL_ELAPSED_TIME,
+
+            // Dot footprint: slightly larger + more air => softer, rounder edge
+            r: 4.0,
+            gap: 0.4,
+
+            dynamic: false,
+            animateOnLoad: true,
+            animationDuration: 900,
+
+            // Let the shape “form” organically
+            initialJitter: 12,
+
+            // ── Force magnitudes by zone ──────────────────────────────
+            // Round bulb: very loose X/Y + strong repulsion at far-left,
+            // Tight choke: strong X + strong Y + lower repulsion around the waist
+            xStrength: d => ({
+                leftDeep: 0.82,
+                left:     0.88,
+                waist:    1.01,
+                right:    0.96
+            })[zone(d)],
+
+            verticalStrength: d => ({
+                leftDeep: 0.032,
+                left:     0.055,
+                waist:    0.115,   // <- pinch hard at the waist
+                right:    0.070
+            })[zone(d)],
+
+            repelStrength: d => ({
+                leftDeep: -0.48,   // <- inflate the bulb
+                left:     -0.38,
+                waist:    -0.19,   // <- allow tight packing at center
+                right:    -0.24
+            })[zone(d)],
+
+            // If your implementation exposes these, set them (safe defaults if ignored):
+            alphaDecay: 0.065,
+            alphaMin:   0.0015,
+            velocityDecay: 0.35,
+            collideRadius: d => 4.3 + 0.44 * 0.45,  // r + gap*0.45
+
+            // Tooltip & layout (unchanged)
+            title: d => `Execution: ${d.TOTAL_ELAPSED_TIME} ms
+            Type: ${d.QUERY_TYPE}
+            DB: ${d.DATABASE_NAME}
+            Warehouse: ${d.WAREHOUSE_NAME}`,
+            chartHeight,
+            marginTop: chartMargins.top,
+            marginBottom: chartMargins.bottom
+            });
+
+            if (!beeSwarmMark) {
+                throw new Error('Failed to create bee swarm mark');
+            }
+
+            const chart = Plot.plot({
+                marks: [beeSwarmMark],
+                color: {
+                    type: "linear",
+                    range: ["#249EDC", "#A62A92"],
+                    interpolate: "hsl",
+                    legend: true,
+                    label: "Execution Time (ms) →"
+                },
+	                height: chartHeight,
+	                width: chartWidth,
+                marginLeft: chartMargins.left,
+                marginRight: chartMargins.right,
+                marginTop: chartMargins.top,
+                marginBottom: chartMargins.bottom
+            });
+            
+            container.appendChild(chart);
+            this.querySwarmChart = chart;
+
+            // Auto-select the left-most point and open the inline panel by default (desktop)
+            try {
+                const allCircles = Array.from(d3.select(chart).selectAll('circle').nodes());
+                if (allCircles.length > 0) {
+                    let minIdx = 0;
+                    let minX = parseFloat(allCircles[0].getAttribute('cx')) || 0;
+                    for (let i = 1; i < allCircles.length; i++) {
+                        const x = parseFloat(allCircles[i].getAttribute('cx'));
+                        if (!isNaN(x) && x < minX) { minX = x; minIdx = i; }
+                    }
+                    const fakeEvent = { target: allCircles[minIdx] };
+                    // Ensure inline panel mode on larger screens
+                    const inlineOk = window.innerWidth >= 1024;
+                    const previousInline = this.useInlineSwarmPanel;
+                    if (inlineOk) this.useInlineSwarmPanel = true;
+                    this.selectQueryPoint(fakeEvent, swarmData[minIdx] || swarmData[0], d3.select(chart).selectAll('circle'));
+                    this.useInlineSwarmPanel = previousInline;
+                }
+            } catch (_) {}
+
+	            // Rug plot beneath the swarm using the same x-scale
+	            const rugConfig = {
+	                height: 16,
+	                tickWidth: 2,
+	                tickMaxHeight: 12,
+	                bins: 320,
+	                minOpacity: 0.45,
+	                maxOpacity: 0.7
+	            };
+	            const xDomain = [
+	                d3.min(swarmData, d => d.TOTAL_ELAPSED_TIME),
+	                d3.max(swarmData, d => d.TOTAL_ELAPSED_TIME)
+	            ];
+	            const innerWidth = Math.max(0, chartWidth - chartMargins.left - chartMargins.right);
+            // Expand bottom margin slightly to guarantee rug visibility
+            const innerHeight = Math.max(0, chartHeight - chartMargins.top - chartMargins.bottom);
+            if (chartMargins.bottom < 140) {
+                // If margins were customized earlier, ensure there is enough space for rug and x-axis
+                chart.style.height = `${chartHeight + (140 - chartMargins.bottom)}px`;
+            }
+	            const xScale = d3.scaleLinear().domain(xDomain).range([chartMargins.left, chartWidth - chartMargins.right]);
+	            const rugBottomY = chartMargins.top + innerHeight - 6;
+	            const rugTopYBase = rugBottomY - rugConfig.height;
+	            const thresholds = d3.range(rugConfig.bins + 1).map((i) => xDomain[0] + (i * (xDomain[1] - xDomain[0]) / rugConfig.bins));
+	            const binner = d3.bin().domain(xDomain).thresholds(thresholds).value(d => d.TOTAL_ELAPSED_TIME);
+	            const bins = binner(swarmData);
+	            const maxBinCount = bins.reduce((m, b) => Math.max(m, b.length), 0) || 1;
+	            const colorScale = d3.scaleLinear().domain(xDomain).range(["#249EDC", "#A62A92"]).interpolate(d3.interpolateHsl);
+
+	            const oldRug = chart.querySelector('g.rug-layer');
+	            if (oldRug) oldRug.remove();
+	            const rugLayer = d3.select(chart).append('g').attr('class', 'rug-layer');
+
+	            for (const bin of bins) {
+	                if (!bin || bin.length === 0) continue;
+	                const xCenter = xScale((bin.x0 + bin.x1) / 2);
+	                const densityRatio = bin.length / maxBinCount;
+	                const tickHeight = Math.max(2, Math.min(rugConfig.tickMaxHeight, rugConfig.tickMaxHeight * densityRatio));
+	                const y1 = rugBottomY;
+	                const y2 = Math.max(rugTopYBase, y1 - tickHeight);
+	                const stroke = colorScale((bin.x0 + bin.x1) / 2);
+	                const opacity = rugConfig.minOpacity + (rugConfig.maxOpacity - rugConfig.minOpacity) * densityRatio;
+	                // Use rects for crisp rendering and consistent width
+	                rugLayer.append('rect')
+	                    .attr('x', Math.round(xCenter - rugConfig.tickWidth / 2) + 0.5)
+	                    .attr('y', y2)
+	                    .attr('width', rugConfig.tickWidth)
+	                    .attr('height', y1 - y2)
+	                    .attr('fill', stroke)
+	                    .attr('fill-opacity', opacity)
+	                    .attr('shape-rendering', 'crispEdges');
+	            }
+
+	            const tooltipId = 'querySwarmRugTooltip';
+	            let tooltip = document.getElementById(tooltipId);
+	            if (!tooltip) {
+	                tooltip = document.createElement('div');
+	                tooltip.id = tooltipId;
+	                tooltip.style.position = 'absolute';
+	                tooltip.style.pointerEvents = 'none';
+	                tooltip.style.zIndex = '10';
+	                tooltip.style.padding = '4px 6px';
+	                tooltip.style.fontSize = '11px';
+	                tooltip.style.borderRadius = '4px';
+	                tooltip.style.background = 'rgba(17,24,39,0.85)';
+	                tooltip.style.color = '#fff';
+	                tooltip.style.transform = 'translate(-50%, -120%)';
+	                tooltip.style.display = 'none';
+	                container.style.position = 'relative';
+	                container.appendChild(tooltip);
+	            }
+
+	            const hoverZoneHeight = rugConfig.height + 10;
+	            const hoverZone = rugLayer.append('rect')
+	                .attr('x', chartMargins.left)
+	                .attr('y', rugBottomY - hoverZoneHeight)
+	                .attr('width', innerWidth)
+	                .attr('height', hoverZoneHeight)
+	                .attr('fill', 'transparent')
+	                .style('cursor', 'crosshair');
+
+	            let dragStartX = null;
+	            const formatNumber = (v) => {
+	                try { return new Intl.NumberFormat().format(Math.round(v)); } catch { return String(Math.round(v)); }
+	            };
+	            const showTooltip = (evt, bin) => {
+	                if (!bin) return;
+	                const [x0, x1] = [bin.x0, bin.x1];
+	                tooltip.textContent = `${formatNumber(x0)}–${formatNumber(x1)} ms • ${bin.length}`;
+	                tooltip.style.left = `${evt.offsetX}px`;
+	                tooltip.style.top = `${rugBottomY}px`;
+	                tooltip.style.display = 'block';
+	            };
+	            const hideTooltip = () => { tooltip.style.display = 'none'; };
+	            const pickBinAtX = (px) => {
+	                const xVal = xScale.invert(px);
+	                const idx = Math.min(bins.length - 1, Math.max(0, Math.floor((xVal - xDomain[0]) / ((xDomain[1] - xDomain[0]) / rugConfig.bins))));
+	                return bins[idx];
+	            };
+
+	            hoverZone.on('mousemove', (ev) => {
+	                const px = d3.pointer(ev, chart)[0];
+	                const bin = pickBinAtX(px);
+	                showTooltip(ev, bin);
+	            });
+	            hoverZone.on('mouseleave', () => { hideTooltip(); });
+	            hoverZone.on('mousedown', (ev) => { dragStartX = d3.pointer(ev, chart)[0]; });
+	            hoverZone.on('mouseup', (ev) => {
+	                const endX = d3.pointer(ev, chart)[0];
+	                if (dragStartX == null) return;
+	                const [a, b] = dragStartX < endX ? [dragStartX, endX] : [endX, dragStartX];
+	                const xmin = Math.max(xDomain[0], xScale.invert(a));
+	                const xmax = Math.min(xDomain[1], xScale.invert(b));
+	                container.dispatchEvent(new CustomEvent('query-rug-filter', { detail: { xmin, xmax } }));
+	                dragStartX = null;
+	            });
+
+            // Nudge the x-axis down slightly to avoid any overlap with the swarm points
+            try {
+                const xAxis = chart.querySelector('g[aria-label="x-axis"], g[aria-label="x axis"], g[aria-label^="x-axis"]');
+                if (xAxis) {
+                    const transform = xAxis.getAttribute('transform') || '';
+                    const match = /translate\(([^,]+),\s*([^\)]+)\)/.exec(transform);
+                    if (match) {
+                        const tx = parseFloat(match[1]);
+                        const ty = parseFloat(match[2]);
+                        const offset = 40; // px
+                        xAxis.setAttribute('transform', `translate(${isNaN(tx) ? 0 : tx}, ${isNaN(ty) ? 0 : ty + offset})`);
+                        // Bring axis to front so labels render above points
+                        chart.appendChild(xAxis);
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not offset x-axis:', e);
+            }
+
+	            // Remove bottom mini-chart (rug) and collapse its space if present
+	            const bottom = document.getElementById('querySwarmBottom');
+	            if (bottom) {
+	                bottom.innerHTML = '';
+	                bottom.classList.add('hidden');
+	            }
+        } catch (error) {
+            console.error('Error creating bee swarm chart:', error);
+            container.innerHTML = '<div class="flex items-center justify-center h-64 text-gray-500"><p>Interactive chart unavailable - using fallback</p></div>';
+            
+            // Fallback: Simple scatter plot using ApexCharts
+            this.renderFallbackQueryChart(container, swarmData);
+        }
+    }
+
+    // Fallback chart using ApexCharts
+    renderFallbackQueryChart(container, data) {
+        container.innerHTML = '<div id="fallbackQueryChart" style="height: 300px;"></div>';
+        
+        const chartData = data.map((item, index) => ({
+            x: item.TOTAL_ELAPSED_TIME,
+            y: Math.random() * 10, // Random y-position for scatter effect
+            queryData: item
+        }));
+
+        const fallbackChart = new ApexCharts(document.getElementById('fallbackQueryChart'), {
+            series: [{
+                name: 'Query Performance',
+                data: chartData
+            }],
+            chart: {
+                type: 'scatter',
+                height: 300,
+                fontFamily: 'Inter, sans-serif',
+                events: {
+                    markerClick: (event, chartContext, { dataPointIndex }) => {
+                        this.showQueryDetails(chartData[dataPointIndex].queryData);
+                    }
+                }
+            },
+            xaxis: {
+                title: { text: 'Execution Time (ms)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                show: false
+            },
+            colors: ['#56CCF2'],
+            markers: {
+                size: 6,
+                strokeWidth: 2,
+                strokeColors: '#ffffff',
+                hover: { size: 8 }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            tooltip: {
+                custom: ({ dataPointIndex }) => {
+                    const item = chartData[dataPointIndex].queryData;
+                    return `<div class="p-3">
+                        <div class="font-semibold">${item.QUERY_TYPE}</div>
+                        <div class="text-sm">${item.TOTAL_ELAPSED_TIME}ms</div>
+                        <div class="text-xs text-gray-500">${item.DATABASE_NAME}</div>
+                    </div>`;
+                }
+            }
+        });
+
+        fallbackChart.render();
+    }
+
+    renderDashboard() {
+        this.updateKPIs();
+        this.renderTabCharts('cost'); // Default tab
+        
+        // Ensure cost tab is active on initial load
+        const activeTab = document.querySelector('.nav-item.active');
+        if (!activeTab || activeTab.dataset.tab !== 'cost') {
+            this.switchTab('cost');
+        }
+    }
+
+    updateKPIs() {
+        // Cost & Credits KPIs
+        const totalSpend = this.data.costPerCredit.reduce((sum, item) => sum + item.SPEND_USD, 0);
+        document.getElementById('totalSpend').textContent = `$${totalSpend.toFixed(2)}`;
+
+        const avgCredits = this.data.costPerCredit.reduce((sum, item) => sum + item.CREDITS, 0) / this.currentDateRange;
+        document.getElementById('avgCredits').textContent = avgCredits.toFixed(1);
+
+        const activeWarehouses = new Set(this.data.creditsByWarehouse.map(item => item.WAREHOUSE_NAME)).size;
+        document.getElementById('activeWarehouses').textContent = activeWarehouses;
+
+        const avgActiveRatio = this.data.idleActiveRatio.reduce((sum, item) => sum + item.ACTIVE_PCT, 0) / this.data.idleActiveRatio.length;
+        document.getElementById('efficiencyScore').textContent = `${(avgActiveRatio * 100).toFixed(1)}%`;
+
+        // Performance KPIs
+        const avgP95 = this.data.queryPerformance.reduce((sum, item) => sum + item.P95_EXEC_SEC, 0) / this.data.queryPerformance.length;
+        document.getElementById('p95QueryTime').textContent = `${avgP95.toFixed(2)}s`;
+
+        const avgFailureRate = this.data.queryFailureRate.reduce((sum, item) => sum + item.FAILURE_RATE, 0) / this.data.queryFailureRate.length;
+        document.getElementById('queryFailureRate').textContent = `${(avgFailureRate * 100).toFixed(1)}%`;
+
+        const todayEvents = this.data.warehouseEvents.filter(event => {
+            const today = new Date();
+            const eventDate = new Date(event.EVENT_TS);
+            return eventDate.toDateString() === today.toDateString();
+        }).length;
+        document.getElementById('warehouseEvents').textContent = todayEvents;
+
+        document.getElementById('loadEfficiency').textContent = `${(avgActiveRatio * 100).toFixed(1)}%`;
+
+        // Pipeline KPIs
+        const avgConnectorSuccess = this.data.connectorHealth.reduce((sum, item) => sum + item.SUCCESS_PCT, 0) / this.data.connectorHealth.length;
+        document.getElementById('connectorSuccess').textContent = `${(avgConnectorSuccess * 100).toFixed(1)}%`;
+
+        const totalSLABreaches = this.data.connectorHealth.reduce((sum, item) => sum + item.SLA_BREACHES, 0);
+        document.getElementById('slaBreaches').textContent = totalSLABreaches;
+
+        const staleDatasets = this.data.dataFreshness.filter(item => item.HOURS_SINCE_LAST_RUN > 24).length;
+        document.getElementById('staleDatasets').textContent = staleDatasets;
+
+        const avgDailyBytes = this.data.dailyBytes.reduce((sum, item) => sum + item.AVG_BYTES_INSERTED, 0) / this.data.dailyBytes.length;
+        document.getElementById('dailyBytes').textContent = Math.round(avgDailyBytes / 1048576); // Convert to MB
+
+        // Adoption KPIs
+        const latestWAU = this.data.snowflakeWAU[this.data.snowflakeWAU.length - 1]?.WAU || 0;
+        document.getElementById('weeklyActiveUsers').textContent = latestWAU;
+
+        document.getElementById('activeDatasets').textContent = this.data.datasetCreditCost.length;
+
+        const activeConnectors = new Set(this.data.connectorHealth.map(item => item.CONNECTOR)).size;
+        document.getElementById('activeConnectors').textContent = activeConnectors;
+
+        const costPerUser = totalSpend / latestWAU;
+        document.getElementById('costPerUser').textContent = `$${costPerUser.toFixed(2)}`;
+
+        // Query Optimization KPIs
+        if (this.queryRewriteResults.length > 0) {
+            document.getElementById('totalQueriesAnalyzed').textContent = this.queryRewriteResults.length;
+            
+            const avgImprovement = this.queryRewriteResults
+                .filter(q => q.ACTION !== 'IGNORE')
+                .reduce((sum, q) => sum + q.PCT_MS, 0) / 
+                this.queryRewriteResults.filter(q => q.ACTION !== 'IGNORE').length;
+            document.getElementById('avgPerformanceImprovement').textContent = `${avgImprovement.toFixed(1)}%`;
+            
+            const totalSavings = this.queryRewriteResults
+                .filter(q => q.ACTION === 'ADOPT')
+                .reduce((sum, q) => sum + q.EST_USD_SAVINGS, 0);
+            document.getElementById('estimatedCreditsSaved').textContent = totalSavings.toFixed(1);
+            
+            const adoptionRate = this.queryRewriteResults.filter(q => q.ACTION === 'ADOPT').length / 
+                                this.queryRewriteResults.length * 100;
+            document.getElementById('adoptionRate').textContent = `${adoptionRate.toFixed(1)}%`;
+        }
+    }
+
+    renderTabCharts(tabName) {
+        switch(tabName) {
+            case 'cost':
+                this.renderCostCharts();
+                break;
+            case 'performance':
+                this.renderPerformanceCharts();
+                break;
+            case 'pipeline':
+                this.renderPipelineCharts();
+                break;
+            case 'adoption':
+                this.renderAdoptionCharts();
+                break;
+            case 'quality':
+                this.renderQualityCharts();
+                break;
+            case 'optimization':
+                this.renderOptimizationCharts();
+                break;
+        }
+    }
+
+    renderOptimizationCharts() {
+        // Performance Improvement Distribution - Compact
+        const improvementRanges = [
+            { range: '0-10%', count: 0 },
+            { range: '10-25%', count: 0 },
+            { range: '25-50%', count: 0 },
+            { range: '50-75%', count: 0 },
+            { range: '75%+', count: 0 }
+        ];
+
+        this.queryRewriteResults.forEach(query => {
+            const improvement = query.PCT_MS;
+            if (improvement < 10) improvementRanges[0].count++;
+            else if (improvement < 25) improvementRanges[1].count++;
+            else if (improvement < 50) improvementRanges[2].count++;
+            else if (improvement < 75) improvementRanges[3].count++;
+            else improvementRanges[4].count++;
+        });
+
+        this.charts.improvementDistributionChart = new ApexCharts(document.querySelector("#improvementDistributionChart"), {
+            series: [{
+                name: 'Queries',
+                data: improvementRanges.map(range => range.count)
+            }],
+            chart: {
+                type: 'bar',
+                height: 140,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            xaxis: {
+                categories: improvementRanges.map(range => range.range),
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            yaxis: {
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            colors: ['#56CCF2'],
+            plotOptions: {
+                bar: {
+                    borderRadius: 2,
+                    dataLabels: { position: 'top' }
+                }
+            },
+            dataLabels: { 
+                enabled: true,
+                style: { fontSize: '9px', colors: [this.isDarkMode ? '#e5e7eb' : '#374151'] }
+            },
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: this.isDarkMode ? '#374151' : '#e5e7eb',
+                show: true
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.improvementDistributionChart.render();
+
+        // Action Breakdown - Compact
+        const actionCounts = {
+            ADOPT: this.queryRewriteResults.filter(q => q.ACTION === 'ADOPT').length,
+            BENCH_TEST: this.queryRewriteResults.filter(q => q.ACTION === 'BENCH_TEST').length,
+            IGNORE: this.queryRewriteResults.filter(q => q.ACTION === 'IGNORE').length
+        };
+
+        this.charts.actionBreakdownChart = new ApexCharts(document.querySelector("#actionBreakdownChart"), {
+            series: Object.values(actionCounts),
+            chart: {
+                type: 'donut',
+                height: 140,
+                fontFamily: 'Inter, sans-serif'
+            },
+            labels: Object.keys(actionCounts),
+
+            colors: ['#95CBEE', '#A62A92', '#9ca3af'], 
+            plotOptions: {
+                pie: {
+                    donut: {
+                        size: '60%',
+                        labels: {
+                            show: true,
+                            total: {
+                                show: true,
+                                label: 'Total',
+                                formatter: () => this.queryRewriteResults.length.toString(),
+                                style: {
+                                    fontSize: '11px',
+                                    color: this.isDarkMode ? '#e5e7eb' : '#374151'
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                formatter: (val) => `${val.toFixed(0)}%`,
+                style: {
+                    fontSize: '9px',
+                    colors: [this.isDarkMode ? '#e5e7eb' : '#374151']
+                }
+            },
+            legend: { 
+                show: false
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.actionBreakdownChart.render();
+
+        // Savings Over Time - Compact
+        const savingsByDate = {};
+        this.queryRewriteResults.forEach(query => {
+            const date = new Date(query.RUN_DTS).toISOString().split('T')[0];
+            if (!savingsByDate[date]) savingsByDate[date] = 0;
+            if (query.ACTION === 'ADOPT') {
+                savingsByDate[date] += query.EST_USD_SAVINGS;
+            }
+        });
+
+        const sortedDates = Object.keys(savingsByDate).sort();
+        
+        this.charts.savingsOverTimeChart = new ApexCharts(document.querySelector("#savingsOverTimeChart"), {
+            series: [{
+                name: 'Est. Savings',
+                data: sortedDates.map(date => ({
+                    x: date,
+                    y: savingsByDate[date]
+                }))
+            }],
+            chart: {
+                type: 'area',
+                height: 140,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { curve: 'smooth', width: 2 },
+            colors: ['#9841b6'],
+            fill: {
+                type: 'gradient',
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.7,
+                    opacityTo: 0.3,
+                    stops: [0, 90, 100]
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: this.isDarkMode ? '#374151' : '#e5e7eb',
+                show: true
+            },
+            xaxis: {
+                type: 'datetime',
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' }
+                }
+            },
+            yaxis: {
+                labels: { 
+                    style: { colors: this.isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '9px' },
+                    formatter: (val) => `${val.toFixed(0)}`
+                }
+            },
+            theme: {
+                mode: this.isDarkMode ? 'dark' : 'light'
+            }
+        });
+        this.charts.savingsOverTimeChart.render();
+    }
+
+    renderCostCharts() {
+        // Credits and Cost Over Time (Full Width Dual-axis Line Chart)
+        this.renderCreditsAndCostChart();
+        
+        // Daily Credits by Service Type (Full Width Stacked Area)
+        const creditsByService = this.aggregateByServiceType();
+        this.charts.creditsChart = new ApexCharts(document.querySelector("#creditsChart"), {
+            series: creditsByService.series,
+            chart: { 
+                type: 'area', 
+                height: 320, 
+                stacked: true, 
+                animations: { enabled: true },
+                toolbar: { show: false },
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                categories: creditsByService.categories,
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            colors: ['#56CCF2', '#2F80ED', '#1E3A8A', '#3730A3', '#4C1D95'],
+            stroke: { curve: 'smooth', width: 2 },
+            fill: { 
+                opacity: 0.8,
+                type: 'gradient',
+                gradient: {
+                    opacityFrom: 0.6,
+                    opacityTo: 0.8,
+                }
+            },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.creditsChart.render();
+
+        // Warehouse Cost Distribution (Treemap)
+        const warehouseCosts = this.aggregateWarehouseCosts();
+        // Compute dynamic ranges from data distribution (quantiles)
+        const values = warehouseCosts.map(d => d.value || d.y || d.size || 0).filter(v => typeof v === 'number');
+        const sortedVals = [...values].sort((a,b) => a-b);
+        const q = (p) => {
+            if (!sortedVals.length) return 0;
+            const idx = (sortedVals.length - 1) * p;
+            const lo = Math.floor(idx), hi = Math.ceil(idx);
+            if (lo === hi) return sortedVals[lo];
+            const h = idx - lo; return sortedVals[lo] * (1 - h) + sortedVals[hi] * h;
+        };
+        const q33 = q(0.33), q66 = q(0.66);
+        this.charts.warehouseTreemap = new ApexCharts(document.querySelector("#warehouseTreemap"), {
+            series: [{ data: warehouseCosts }],
+            chart: { 
+                type: 'treemap', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            colors: ['#56CCF2'],
+            plotOptions: {
+                treemap: {
+                    enableShades: true,
+                    shadeIntensity: 0.5,
+                    reverseNegativeShade: true,
+                    colorScale: {
+                        ranges: [
+                            { from: Number.NEGATIVE_INFINITY, to: q33, color: '#95CBEE' },
+                            { from: q33, to: q66, color: '#259EDC' },
+                            { from: q66, to: Number.POSITIVE_INFINITY, color: '#A62A92' }
+                        ]
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                style: { fontSize: '12px', fontWeight: 600 }
+            }
+        });
+        this.charts.warehouseTreemap.render();
+
+        // Warehouse Utilization (Horizontal Bar)
+        this.charts.utilizationChart = new ApexCharts(document.querySelector("#utilizationChart"), {
+            series: [{
+                name: 'Active %',
+                data: this.data.idleActiveRatio.map(item => (item.ACTIVE_PCT * 100).toFixed(1))
+            }, {
+                name: 'Queued %',
+                data: this.data.idleActiveRatio.map(item => (item.QUEUED_PCT * 100).toFixed(1))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            plotOptions: { 
+                bar: { 
+                    horizontal: true,
+                    barHeight: '70%',
+                    dataLabels: { position: 'top' }
+                } 
+            },
+            xaxis: { 
+                categories: this.data.idleActiveRatio.map(item => item.WAREHOUSE_NAME),
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            colors: ['#A62A92', '#259EDC'],
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.utilizationChart.render();
+
+        // Dataset Cost Table
+        this.renderDatasetCostTable();
+
+        // Cost per Successful Row (Efficiency)
+        // Ensure this chart renders alongside other Cost & Credits visuals
+        this.renderCostPerRowLine();
+    }
+
+    // Cost efficiency = total spend / total successful rows, by day
+    renderCostPerRowLine() {
+        try {
+            const costsByDate = {};
+            (this.data.costPerCredit || []).forEach(item => {
+                const key = new Date(item.USAGE_DATE).toISOString().split('T')[0];
+                costsByDate[key] = (costsByDate[key] || 0) + (item.SPEND_USD || 0);
+            });
+
+            const rowsByDate = {};
+            (this.data.successfulRows || []).forEach(item => {
+                const key = new Date(item.RUN_DATE).toISOString().split('T')[0];
+                rowsByDate[key] = (rowsByDate[key] || 0) + (item.ROWS_LOADED || 0);
+            });
+
+            const allDates = Array.from(new Set([
+                ...Object.keys(costsByDate),
+                ...Object.keys(rowsByDate)
+            ])).sort();
+
+            const seriesData = allDates
+                .filter(d => rowsByDate[d] > 0)
+                .map(d => ({
+                    x: d,
+                    y: costsByDate[d] / rowsByDate[d],
+                    cost: costsByDate[d] || 0,
+                    rows: rowsByDate[d] || 0
+                }));
+
+            // Guard: if we still have no points, show friendly empty state
+            if (!seriesData.length) {
+                const el = document.querySelector('#costPerRowLine');
+                if (el) {
+                    el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost/row data for the selected period</div>';
+                }
+                return;
+            }
+
+            const chart = new ApexCharts(document.querySelector('#costPerRowLine'), {
+                series: [{ name: 'Cost per Row ($)', data: seriesData }],
+                chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
+                stroke: { curve: 'smooth', width: 3 },
+                markers: { size: 4 },
+                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+                yaxis: {
+                    title: { text: 'Cost per Row ($)', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '12px' }, formatter: v => '$' + (v ?? 0).toFixed(4) }
+                },
+                colors: ['#259EDC'],
+                fill: { type: 'solid', opacity: 0.95 },
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } },
+                tooltip: {
+                    custom: ({ dataPointIndex }) => {
+                        const d = seriesData[dataPointIndex];
+                        if (!d) return '';
+                        return `\
+<div class="p-3">\
+  <div class="font-medium">${new Date(d.x).toLocaleDateString()}</div>\
+  <div class="text-sm text-gray-600 mt-1">\
+    Total Cost: $${(d.cost || 0).toLocaleString()}<br/>\
+    Total Rows: ${(d.rows || 0).toLocaleString()}<br/>\
+    Cost per Row: $${(d.y || 0).toFixed(4)}\
+  </div>\
+</div>`;
+                    }
+                }
+            });
+            chart.render();
+            this.charts.costPerRowLine = chart;
+        } catch (err) {
+            console.error('Error rendering Cost per Row chart:', err);
+            const el = document.querySelector('#costPerRowLine');
+            if (el) {
+                el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Error rendering chart</div>';
+            }
+        }
+    }
+
+    renderCreditsAndCostChart() {
+        try {
+            // Aggregate credits and cost by day from the existing cost data
+            const dailyData = {};
+            
+            // Process cost per credit data to get daily totals
+            (this.data.costPerCredit || []).forEach(item => {
+                const date = new Date(item.USAGE_DATE).toISOString().split('T')[0];
+                if (!dailyData[date]) {
+                    dailyData[date] = { credits: 0, cost: 0 };
+                }
+                dailyData[date].credits += (item.CREDITS_USED || 0);
+                dailyData[date].cost += (item.SPEND_USD || 0);
+            });
+
+            const sortedDates = Object.keys(dailyData).sort();
+            const creditsData = sortedDates.map(date => ({
+                x: date,
+                y: dailyData[date].credits
+            }));
+            const costData = sortedDates.map(date => ({
+                x: date,
+                y: dailyData[date].cost
+            }));
+
+            // Guard: if no data, show empty state
+            if (!sortedDates.length) {
+                const el = document.querySelector('#creditsAndCostChart');
+                if (el) {
+                    el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No credits/cost data for the selected period</div>';
+                }
+                return;
+            }
+
+            const chart = new ApexCharts(document.querySelector('#creditsAndCostChart'), {
+                series: [
+                    { name: 'Credits Used', data: creditsData, type: 'line' },
+                    { name: 'Cost (USD)', data: costData, type: 'line' }
+                ],
+                chart: { 
+                    type: 'line', 
+                    height: 320, 
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false }
+                },
+                stroke: { 
+                    curve: 'smooth', 
+                    width: [3, 3]
+                },
+                markers: { size: 0 },
+                xaxis: { 
+                    type: 'datetime',
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' }
+                    }
+                },
+                yaxis: [
+                    {
+                        title: { 
+                            text: 'Credits Used',
+                            style: { color: '#A62A92' }
+                        },
+                        labels: { 
+                            style: { colors: '#6b7280', fontSize: '12px' },
+                            formatter: v => (v ?? 0).toLocaleString()
+                        }
+                    },
+                    {
+                        opposite: true,
+                        title: { 
+                            text: 'Cost (USD)',
+                            style: { color: '#99C8EC' }
+                        },
+                        labels: { 
+                            style: { colors: '#6b7280', fontSize: '12px' },
+                            formatter: v => '$' + (v ?? 0).toLocaleString()
+                        }
+                    }
+                ],
+                colors: ['#A62A92', '#99C8EC'],
+                fill: { 
+                    opacity: 1
+                },
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { 
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    labels: { colors: '#374151' }
+                },
+                tooltip: {
+                    shared: true,
+                    intersect: false,
+                    x: {
+                        formatter: val => new Date(val).toLocaleDateString()
+                    },
+                    y: [
+                        {
+                            formatter: val => (val ?? 0).toLocaleString() + ' credits'
+                        },
+                        {
+                            formatter: val => '$' + (val ?? 0).toLocaleString()
+                        }
+                    ]
+                }
+            });
+            
+            chart.render();
+            this.charts.creditsAndCostChart = chart;
+        } catch (err) {
+            console.error('Error rendering Credits and Cost chart:', err);
+            const el = document.querySelector('#creditsAndCostChart');
+            if (el) {
+                el.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Error rendering chart</div>';
+            }
+        }
+    }
+
+    renderPerformanceCharts() {
+        // P95 Query Duration Trend (Full Width)
+        this.charts.queryPerformanceChart = new ApexCharts(document.querySelector("#queryPerformanceChart"), {
+            series: [{
+                name: 'P95 Execution Time',
+                data: this.data.queryPerformance.map(item => ({
+                    x: item.USAGE_DATE,
+                    y: item.P95_EXEC_SEC
+                }))
+            }],
+            chart: { 
+                type: 'line', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { curve: 'smooth', width: 3 },
+            colors: ['#259EDC'],
+            fill: {
+                opacity: 1
+            },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+            yaxis: { title: { text: 'Seconds', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+            annotations: { yaxis: [{ y: 1.0, borderColor: '#f59e0b', borderWidth: 2, strokeDashArray: 5, label: { text: 'SLA Threshold (1.0s)', style: { color: '#259EDC', background: '#fef3c7' } } }] }
+        });
+        this.charts.queryPerformanceChart.render();
+
+        // Throughput Trend Evolution (Rows/sec & Bytes/sec)
+        this.renderThroughputTrendChart();
+
+        // Query Failure Rate Trend
+        this.charts.failureRateChart = new ApexCharts(document.querySelector("#failureRateChart"), {
+            series: [{ name: 'Failure Rate %', data: this.data.queryFailureRate.map(item => ({ x: item.USAGE_DATE, y: (item.FAILURE_RATE * 100).toFixed(2) })) }],
+            chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
+            colors: ['#A62A92'],
+            plotOptions: { bar: { borderRadius: 4, dataLabels: { position: 'top' } } },
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+            yaxis: { title: { text: 'Failure Rate (%)', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '12px' } } }
+        });
+        this.charts.failureRateChart.render();
+
+        // Warehouse Events Timeline
+        const eventData = this.processWarehouseEvents();
+        this.charts.warehouseEventsChart = new ApexCharts(document.querySelector("#warehouseEventsChart"), {
+            series: eventData.series,
+            chart: { type: 'scatter', height: 320, fontFamily: 'Inter, sans-serif' },
+            markers: { size: 3 },
+            xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+            yaxis: { categories: eventData.warehouses, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
+            colors: ['#A62A92', '#A07AC0', '#99CCEE'],
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            legend: { position: 'top', labels: { colors: '#374151' } }
+        });
+        this.charts.warehouseEventsChart.render();
+
+        // Query Performance Bee Swarm Chart
+        this.renderQuerySwarmChart();
+
+        // Top Slowest Connector Runs Table
+        try {
+            const slowestRuns = (this.data.connectorRuns || [])
+                .filter(run => run.Status === 'SUCCESS' && Number.isFinite(run['Run Time Seconds']))
+                .sort((a, b) => b['Run Time Seconds'] - a['Run Time Seconds'])
+                .slice(0, 15);
+            const container = document.getElementById('slowRunsTable');
+            if (!container) return;
+            let html = `
+                <div class=\"overflow-auto h-full\">\n                  <table class=\"min-w-full\">\n                    <thead class=\"bg-gray-50 sticky top-0\">\n                      <tr>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Dataset</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Run Start</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Run Time (s)</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Rows/sec</th>\n                        <th class=\"px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">Bytes/sec</th>\n                      </tr>\n                    </thead>\n                    <tbody class=\"bg-white divide-y divide-gray-200\">`;
+            slowestRuns.forEach(run => {
+                html += `\n                  <tr class=\"hover:bg-gray-50\">\n                    <td class=\"px-3 py-2 text-sm text-gray-900\">${run['Data Source Name']}</td>\n                    <td class=\"px-3 py-2 text-sm text-gray-500\">${new Date(run['Start Time']).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Run Time Seconds']||0).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Rows Per Second']||0).toLocaleString()}</td>\n                    <td class=\"px-3 py-2 text-sm font-mono text-gray-900\">${(run['Bytes Per Second']||0).toLocaleString()}</td>\n                  </tr>`;
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        } catch (e) {
+            console.error('Error rendering slow runs table:', e);
+            const container = document.getElementById('slowRunsTable');
+            if (container) container.innerHTML = '<div class=\"h-full flex items-center justify-center text-gray-500\">Table unavailable</div>';
+        }
+    }
+    renderQualityCharts() {
+			try { this.renderCoverageAnomaliesChart(); } catch(e){ console.error(e); }
+			try { this.renderSchemaNullRegressionMatrix(); } catch(e){ console.error(e); }
+        try { this.renderNullsAndDupesTable(); } catch(e){ console.error(e); }
+        try { this.wireOrphanRateCard(); } catch(e){ console.error(e); }
+        try { this.renderSchemaDriftLog(); } catch(e){ console.error(e); }
+    }
+
+    renderCoverageAnomaliesChart() {
+        const container = document.querySelector('#coverageAnomaliesChart');
+        if (!container) return;
+        
+        // Organize data by dataset and create normal vs anomaly series
+        const byDataset = {};
+        (this.data.dataCoverage || []).forEach(r => {
+            (byDataset[r.DATASET] ||= []).push({ 
+                x: r.RUN_DATE, 
+                y: r.ROWS_LOADED, 
+                z: r.ZSCORE_ROWS_LOADED, 
+                avg: r.AVG_ROWS_30D,
+                isAnomaly: Math.abs(r.ZSCORE_ROWS_LOADED) >= 2
+            });
+        });
+        
+        const datasets = Object.keys(byDataset).slice(0,3);
+        const series = [];
+        
+        // Create scatter series for each dataset - normal points
+        datasets.forEach((ds, index) => {
+            const normalPoints = byDataset[ds].filter(p => !p.isAnomaly);
+            const anomalyPoints = byDataset[ds].filter(p => p.isAnomaly);
+            
+            // Normal data points (small markers)
+            if (normalPoints.length > 0) {
+                series.push({
+                    name: ds,
+                    type: 'scatter',
+                    data: normalPoints.map(p => ({ x: p.x, y: p.y }))
+                });
+            }
+            
+            // Anomaly points (slightly larger, different style)
+            if (anomalyPoints.length > 0) {
+                series.push({
+                    name: `${ds} Anomalies`,
+                    type: 'scatter',
+                    data: anomalyPoints.map(p => ({ 
+                        x: p.x, 
+                        y: p.y,
+                        fillColor: '#ef4444',
+                        strokeColor: '#dc2626'
+                    }))
+                });
+            }
+        });
+        
+        const chart = new ApexCharts(container, {
+            series,
+            chart: { 
+                type: 'scatter', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif', 
+                toolbar: { show: false },
+                zoom: { enabled: true, type: 'xy' }
+            },
+            markers: {
+                size: [3, 3, 3, 5, 5, 5], // Small for normal, slightly larger for anomalies
+                strokeWidth: [0, 0, 0, 1, 1, 1],
+                hover: { size: [5, 5, 5, 7, 7, 7] }
+            },
+            xaxis: { 
+                type: 'datetime',
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '11px' },
+                    formatter: function(val) {
+                        return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }
+                }
+            },
+            yaxis: { 
+                title: { text: 'Rows Loaded', style: { color: '#6b7280' } }, 
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '11px' },
+                    formatter: function(val) {
+                        return val >= 1000 ? (val/1000).toFixed(1) + 'K' : val.toFixed(0);
+                    }
+                }
+            },
+            colors: ['#259EDC', '#56CCF2', '#A62A92', '#ef4444', '#ef4444', '#ef4444'],
+            dataLabels: { enabled: false },
+            grid: { 
+                strokeDashArray: 3, 
+                borderColor: '#e5e7eb',
+                xaxis: { lines: { show: true } },
+                yaxis: { lines: { show: true } }
+            },
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right', 
+                labels: { colors: '#374151' },
+                markers: { width: 8, height: 8 }
+            },
+            tooltip: {
+                custom: function({ series, seriesIndex, dataPointIndex, w }) {
+                    const data = w.globals.initialSeries[seriesIndex].data[dataPointIndex];
+                    const isAnomaly = w.globals.seriesNames[seriesIndex].includes('Anomalies');
+                    const date = new Date(data.x).toLocaleDateString();
+                    const value = data.y.toLocaleString();
+                    
+                    return `<div class="px-3 py-2 bg-white border rounded shadow-lg">
+                        <div class="font-semibold">${w.globals.seriesNames[seriesIndex]}</div>
+                        <div class="text-sm text-gray-600">${date}</div>
+                        <div class="text-sm">Rows: ${value}</div>
+                        ${isAnomaly ? '<div class="text-xs text-red-600 font-medium">⚠️ Anomaly Detected</div>' : ''}
+                    </div>`;
+                }
+            }
+        });
+        
+        chart.render();
+        this.charts.coverageAnomaliesChart = chart;
+    }
+
+    renderNullsAndDupesTable() {
+        const container = document.getElementById('nullsAndDupesTable');
+        if (!container) return;
+        const issues = [];
+        (this.data.dataCompleteness || []).forEach(item => {
+            if (item.DUP_PK_COUNT > 0) issues.push({ column: 'PRIMARY_KEY', dataset: item.DATASET, issue: 'Duplicates', value: item.DUP_PK_COUNT, rowCount: item.ROW_COUNT, severity: item.DUP_PK_COUNT>10?'high':'medium' });
+            Object.keys(item).forEach(k => {
+                if (k.startsWith('NULL_PCT_') && item[k] > 5) issues.push({ column: k.replace('NULL_PCT_',''), dataset: item.DATASET, issue: 'High Null Rate', value: item[k], rowCount: item.ROW_COUNT, severity: item[k]>10?'high':'medium' });
+            });
+        });
+        const top15 = issues.sort((a,b) => (a.severity==='high'?1:0) < (b.severity==='high'?1:0) ? 1 : (b.value - a.value)).slice(0,15);
+        let html = `
+          <div class="overflow-x-auto"><table class="min-w-full"><thead><tr class="border-b border-gray-200">
+            <th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>
+            <th class="text-left py-3 px-4 font-semibold text-gray-900">Dataset</th>
+            <th class="text-left py-3 px-4 font-semibold text-gray-900">Issue</th>
+            <th class="text-left py-3 px-4 font-semibold text-gray-900">Value</th>
+            <th class="text-left py-3 px-4 font-semibold text-gray-900">Row Count</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">`;
+        top15.forEach(i => {
+            const badge = i.severity==='high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
+            const val = i.issue==='Duplicates' ? i.value : `${i.value.toFixed(1)}%`;
+            html += `<tr class="hover:bg-gray-50"><td class="py-3 px-4 text-sm text-gray-900">${i.column}</td>
+              <td class="py-3 px-4 text-sm text-gray-900">${i.dataset}</td>
+              <td class="py-3 px-4 text-sm"><span class="px-2 py-1 text-xs rounded-full ${badge}">${i.issue}</span></td>
+              <td class="py-3 px-4 text-sm font-mono text-gray-900">${val}</td>
+              <td class="py-3 px-4 text-sm font-mono text-gray-500">${i.rowCount.toLocaleString()}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+
+
+    renderOrphanRateBar() {
+        const container = document.getElementById('orphanRateBar');
+        if (!container) return;
+        const top = (this.data.dataConsistency || []).sort((a,b)=>b.ORPHAN_ROWS - a.ORPHAN_ROWS).slice(0,10);
+        const chart = new ApexCharts(container, {
+            series: [{ name: 'Orphan Rows', data: top.map(i => ({ x: i.CHECK_NAME.replace('FK_',''), y: i.ORPHAN_ROWS })) }],
+            chart: { type: 'bar', height: 320, fontFamily: 'Inter, sans-serif' },
+            plotOptions: { bar: { horizontal: false, borderRadius: 4 } },
+            xaxis: { labels: { style: { colors: '#6b7280', fontSize: '10px' }, rotate: -45 } },
+            yaxis: { title: { text: 'Orphan Count', style: { color: '#6b7280' } }, labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
+            colors: ['#259EDC'], dataLabels: { enabled: false }, grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
+        });
+        chart.render();
+        this.charts.orphanRateBar = chart;
+    }
+
+    wireOrphanRateCard() {
+        const card = document.getElementById('orphanRateCard');
+        const popout = document.getElementById('orphanRatePopout');
+        if (!card || !popout) return;
+
+        const since = new Date(Date.now() - this.currentDateRange * 24 * 60 * 60 * 1000);
+        const consistencyRows = (this.data.dataConsistency || []).filter(r => new Date(r.AS_OF_DATE) >= since);
+        const completenessRows = (this.data.dataCompleteness || []).filter(r => true);
+
+        const totalOrphans = consistencyRows.reduce((s, r) => s + (r.ORPHAN_ROWS || 0), 0);
+        const totalRows = completenessRows.reduce((s, r) => s + (r.ROW_COUNT || 0), 0) || 0;
+        const pct = totalRows > 0 ? (totalOrphans * 100) / totalRows : 0;
+
+        const pctEl = document.getElementById('orphanRatePct');
+        const statusEl = document.getElementById('orphanRateStatus');
+        if (pctEl) pctEl.textContent = `${pct.toFixed(2)}%`;
+
+        let status = 'Healthy';
+        let statusClass = 'text-green-600';
+        if (pct >= 5 && pct < 10) { status = 'Elevated'; statusClass = 'text-orange-600'; }
+        if (pct >= 10) { status = 'Critical'; statusClass = 'text-red-600'; }
+        if (statusEl) { statusEl.textContent = status; statusEl.className = `text-sm ${statusClass}`; }
+
+        const checks = [...consistencyRows]
+            .sort((a,b) => (b.ORPHAN_ROWS||0) - (a.ORPHAN_ROWS||0))
+            .slice(0, 10);
+
+        const rowsHtml = checks.length === 0
+            ? '<div class="text-xs text-gray-500">No orphaned rows in the selected period.</div>'
+            : `<div class="overflow-auto">
+                <table class="min-w-full">
+                  <thead>
+                    <tr class="border-b border-gray-200">
+                       <th class="text-left py-1 px-2 text-xs text-gray-600">Check</th>
+                       <th class="text-right py-1 px-2 text-xs text-gray-600">Orphan Rows</th>
+                       <th class="text-left py-1 px-2 text-xs text-gray-600">As Of</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100">
+                    ${checks.map(r => `<tr>
+                        <td class="py-1 px-2 text-xs text-gray-900">${(r.CHECK_NAME||r.CHECK||'—').replace('FK_','')}</td>
+                        <td class="py-1 px-2 text-xs text-gray-900 text-right">${(r.ORPHAN_ROWS||0).toLocaleString()}</td>
+                        <td class="py-1 px-2 text-xs text-gray-600">${new Date(r.AS_OF_DATE).toLocaleDateString()}</td>
+                    </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>`;
+
+        popout.innerHTML = rowsHtml;
+
+        const toggleBtn = document.getElementById('orphanDetailsToggle');
+        const toggle = () => {
+            const wasHidden = popout.classList.contains('hidden');
+            popout.classList.toggle('hidden', !wasHidden);
+            // When opening (was hidden), raise card's stacking
+            if (wasHidden) {
+                card.style.zIndex = '1000015';
+            } else {
+                card.style.zIndex = '';
+            }
+        };
+        if (toggleBtn) toggleBtn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+        card.addEventListener('click', (e) => {
+            if (e.target && e.target.closest('#orphanDetailsToggle')) return;
+            toggle();
+        });
+    }
+
+    renderSchemaDriftLog() {
+        const container = document.getElementById('schemaDriftLog');
+        if (!container) return;
+        let html = '<div class="overflow-x-auto"><table class="min-w-full"><thead><tr class="border-b border-gray-200">'+
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Date</th>'+ 
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Change</th>'+ 
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Schema</th>'+ 
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Table</th>'+ 
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Column</th>'+ 
+            '<th class="text-left py-3 px-4 font-semibold text-gray-900">Type</th>'+ 
+            '</tr></thead><tbody class="divide-y divide-gray-100" id="schemaDriftBody">';
+        (this.data.schemaDrift || []).forEach(item => {
+            const cls = item.CHANGE_TYPE==='ADDED'?'bg-green-100 text-green-800': item.CHANGE_TYPE==='REMOVED'?'bg-red-100 text-red-800':'bg-blue-100 text-blue-800';
+            html += `<tr class="hover:bg-gray-50" data-schema="${item.TABLE_SCHEMA}" data-table="${item.TABLE_NAME}">`+
+                `<td class="py-3 px-4 text-sm text-gray-500">${new Date(item.CHANGE_DATE).toLocaleDateString()}</td>`+
+                `<td class="py-3 px-4 text-sm"><span class="px-2 py-1 text-xs rounded-full ${cls}">${item.CHANGE_TYPE}</span></td>`+
+                `<td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_SCHEMA}</td>`+
+                `<td class="py-3 px-4 text-sm text-gray-900">${item.TABLE_NAME}</td>`+
+                `<td class="py-3 px-4 text-sm font-mono text-gray-900">${item.COLUMN_NAME}</td>`+
+                `<td class="py-3 px-4 text-sm font-mono text-gray-500">${item.DATA_TYPE}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+        const filterInput = document.getElementById('schemaDriftFilter');
+        if (filterInput) {
+            filterInput.addEventListener('input', (e) => {
+                const val = e.target.value.toLowerCase();
+                document.querySelectorAll('#schemaDriftBody tr').forEach(tr => {
+                    const schema = tr.dataset.schema.toLowerCase();
+                    const table = tr.dataset.table.toLowerCase();
+                    const text = tr.textContent.toLowerCase();
+                    tr.style.display = (schema.includes(val) || table.includes(val) || text.includes(val)) ? '' : 'none';
+                });
+            });
+        }
+    }
+
+    // Schema Drift → Null Regression Matrix
+    renderSchemaNullRegressionMatrix() {
+        const container = document.getElementById('schemaNullRegressionMatrix');
+        const liftTable = document.getElementById('schemaNullLiftTable');
+        if (!container || !liftTable) return;
+
+        // Build day offsets and map
+        const offsets = [-7,-6,-5,-4,-3,-2,-1,0,1,2];
+        const today = new Date();
+
+        // Respect period filter
+        const since = new Date(Date.now() - this.currentDateRange * 86400000);
+
+        // Collapse multiple drifts per column to latest within period; build rows with drift_date and table_fqn
+        const driftRowsRaw = (this.data.schemaDrift || []).map(d => ({
+            CHANGE_TYPE: d.CHANGE_TYPE,
+            TABLE_CATALOG: d.TABLE_CATALOG,
+            TABLE_SCHEMA: d.TABLE_SCHEMA,
+            TABLE_NAME: d.TABLE_NAME,
+            COLUMN_NAME: d.COLUMN_NAME,
+            DETECTED_AT: d.CHANGE_DATE || d.DETECTED_AT || null,
+            SNAP_DATE: d.SNAP_DATE || null
+        })).map(r => ({
+            ...r,
+            TABLE_FQN: `${r.TABLE_CATALOG}.${r.TABLE_SCHEMA}.${String(r.TABLE_NAME).replace(/\s+/g,'_').toUpperCase()}`,
+            DRIFT_DATE: r.DETECTED_AT ? new Date(r.DETECTED_AT) : (r.SNAP_DATE ? new Date(r.SNAP_DATE) : today)
+        })).filter(r => r.DRIFT_DATE >= since)
+          .filter(r => !this.currentDatabase || r.TABLE_CATALOG === this.currentDatabase)
+          .filter(r => !this.currentSchema || r.TABLE_SCHEMA === this.currentSchema);
+
+        const latestByKey = new Map();
+        driftRowsRaw.forEach(r => {
+            const key = `${r.TABLE_FQN}||${r.COLUMN_NAME}`;
+            const prev = latestByKey.get(key);
+            if (!prev || r.DRIFT_DATE > prev.DRIFT_DATE) latestByKey.set(key, r);
+        });
+        const driftRows = Array.from(latestByKey.values());
+        if (driftRows.length === 0) {
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500 text-sm">No schema changes in the selected period.</div>';
+            liftTable.innerHTML = '';
+            return;
+        }
+
+        // Pull null pct time series for window days per (table_fqn, column)
+        const tall = this.data.dataCompletenessTall || [];
+        const cfg = this.data.completenessConfig || [];
+        const fqnToDataset = new Map(cfg.map(x => [x.TABLE_FQN, x.DATASET]));
+
+        const seriesRows = [];
+        const rowStats = [];
+        driftRows.forEach(drift => {
+            const rowKey = `${drift.TABLE_FQN}||${drift.COLUMN_NAME}`;
+            const driftDate = new Date(drift.DRIFT_DATE);
+            const byOffset = new Map();
+            offsets.forEach(off => {
+                const day = new Date(driftDate.getTime() + off * 86400000);
+                const ymd = day.toISOString().split('T')[0];
+                // find closest same-day entry
+                const rec = tall.find(r => r.TABLE_FQN === drift.TABLE_FQN && r.COLUMN_NAME === drift.COLUMN_NAME && new Date(r.AS_OF_DATE).toISOString().split('T')[0] === ymd);
+                byOffset.set(off, rec ? (Number(rec.NULL_PCT) * 100) : null);
+            });
+
+            // Baseline [-7..-1], Post [0..2]
+            const baselineVals = offsets.filter(o => o < 0).map(o => byOffset.get(o)).filter(v => v !== null && Number.isFinite(v));
+            const postVals = offsets.filter(o => o >= 0).map(o => byOffset.get(o)).filter(v => v !== null && Number.isFinite(v));
+            const mean = arr => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
+            const baseline = mean(baselineVals);
+            const post = mean(postVals);
+            const lift = (post !== null && baseline !== null) ? (post - baseline) : null;
+
+            const dataset = fqnToDataset.get(drift.TABLE_FQN) || null;
+            const labelLeft = dataset ? `${dataset} • ` : '';
+            const table = drift.TABLE_NAME;
+            const label = `${labelLeft}${table}.${drift.COLUMN_NAME}`;
+
+            seriesRows.push({
+                key: rowKey,
+                name: label,
+                changeType: drift.CHANGE_TYPE,
+                data: offsets.map(off => ({ x: off, y: byOffset.get(off) }))
+            });
+            rowStats.push({ key: rowKey, name: label, baseline, post, lift, changeType: drift.CHANGE_TYPE });
+        });
+
+        // Keep top 20 by absolute lift
+        const ranked = rowStats
+            .filter(r => r.lift !== null)
+            .sort((a,b) => Math.abs(b.lift) - Math.abs(a.lift))
+            .slice(0, 20);
+        const keepKeys = new Set(ranked.map(r => r.key));
+        const filteredSeries = seriesRows.filter(r => keepKeys.has(r.key));
+
+        // Sort rows by |lift| desc
+        const order = new Map(ranked.map((r, idx) => [r.key, idx]));
+        filteredSeries.sort((a,b) => (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0));
+
+        // Diverging color scale centered on baseline mean (global approximation)
+        const globalBaseline = (() => {
+            const vals = ranked.map(r => r.baseline).filter(v => v !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+        })();
+
+        // Build Apex series as heatmap rows
+        const apexSeries = filteredSeries.map(row => ({
+            name: row.name,
+            data: row.data.map(d => ({ x: d.x, y: d.y }))
+        }));
+
+        // Cleanup any existing chart
+        if (this.charts.schemaNullHeatmap) {
+            try { this.charts.schemaNullHeatmap.destroy(); } catch(e){}
+        }
+
+        // Custom color function to diverge around globalBaseline
+        const colorFn = (value) => {
+            if (value === null || !Number.isFinite(value)) return '#e5e7eb';
+            const v = value;
+            const center = globalBaseline;
+            const delta = v - center;
+            // Map delta to -1..1 roughly over ±15pp
+            const scale = Math.max(-1, Math.min(1, delta / 15));
+            const warm = { r: 234, g: 88, b: 12 };   // orange-600
+            const cool = { r: 37, g: 99, b: 235 };   // blue-600
+            const mid = { r: 203, g: 213, b: 225 };  // slate-300
+            const mix = (a,b,t) => Math.round(a + (b - a) * t);
+            const t = Math.abs(scale);
+            const from = mid, to = scale >= 0 ? warm : cool;
+            const r = mix(from.r, to.r, t), g = mix(from.g, to.g, t), b = mix(from.b, to.b, t);
+            return `rgb(${r},${g},${b})`;
+        };
+
+        // Build discrete color ranges around globalBaseline
+        const b = Math.max(0, Math.min(100, globalBaseline));
+        const ranges = [
+            { from: 0, to: Math.max(0, Math.floor(b - 12)), color: '#93c5fd', name: 'Below' },
+            { from: Math.max(0, Math.floor(b - 12))+0.001, to: Math.max(0, Math.floor(b - 4)), color: '#60a5fa', name: 'Slightly Below' },
+            { from: Math.max(0, Math.floor(b - 4))+0.001, to: Math.min(100, Math.ceil(b + 4)), color: '#cbd5e1', name: 'Baseline' },
+            { from: Math.min(100, Math.ceil(b + 4))+0.001, to: Math.min(100, Math.ceil(b + 12)), color: '#fb923c', name: 'Slightly Above' },
+            { from: Math.min(100, Math.ceil(b + 12))+0.001, to: 100, color: '#ea580c', name: 'Above' }
+        ];
+
+        // Render heatmap
+        const chart = new ApexCharts(container, {
+            series: apexSeries,
+            chart: { 
+                type: 'heatmap', 
+                height: 380, 
+                fontFamily: 'Inter, sans-serif', 
+                toolbar: { show: false },
+                offsetX: 0,
+                offsetY: 0
+            },
+            plotOptions: {
+                heatmap: {
+                    shadeIntensity: 0.5,
+                    colorScale: { ranges }
+                }
+            },
+            xaxis: {
+                categories: offsets,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } },
+                title: { text: 'Days from drift', style: { color: '#6b7280' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '10px' } }
+            },
+            dataLabels: { enabled: false },
+            grid: { padding: { left: 40, right: 0 } },
+            legend: { show: false },
+            tooltip: {
+                custom: ({ seriesIndex, dataPointIndex, w }) => {
+                    const rowKey = filteredSeries[seriesIndex]?.key;
+                    const stats = ranked.find(r => r.key === rowKey);
+                    const off = offsets[dataPointIndex];
+                    const base = stats?.baseline;
+                    const post = stats?.post;
+                    const lift = stats?.lift;
+                    const y = w.globals.series[seriesIndex][dataPointIndex];
+                    // approximate date label: drift_date + off
+                    const drift = driftRows.find(d => `${d.TABLE_FQN}||${d.COLUMN_NAME}` === rowKey)?.DRIFT_DATE || today;
+                    const date = new Date(new Date(drift).getTime() + off * 86400000);
+                    const fmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)}%`;
+                    const liftFmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${(v>=0?'+':'')}${v.toFixed(1)} pp`;
+                    return `<div class="px-3 py-2 bg-white border rounded shadow-lg">
+                        <div class="font-semibold">${filteredSeries[seriesIndex]?.name || ''}</div>
+                        <div class="text-xs text-gray-500">${date.toLocaleDateString()} (d${off>=0?'+':''}${off})</div>
+                        <div class="text-sm">Null %: ${fmt(y)}</div>
+                        <div class="text-xs text-gray-600">Baseline: ${fmt(base)} • Post: ${fmt(post)} • Lift: ${liftFmt(lift)}</div>
+                    </div>`;
+                }
+            }
+        });
+        chart.render();
+        this.charts.schemaNullHeatmap = chart;
+
+        // Lift table (formatted like Top Slowest Domo Connector Runs)
+        const rowsHtml = ranked.map(r => {
+            const warm = r.lift !== null && r.lift > 0;
+            const badgeCls = r.changeType==='ADDED' ? 'bg-green-100 text-green-800' : r.changeType==='REMOVED' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
+            const colorCls = warm ? 'text-orange-600' : 'text-blue-600';
+            const fmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)}%`;
+            const liftFmt = (v) => v === null || !Number.isFinite(v) ? '—' : `${(v>=0?'+':'')}${v.toFixed(1)} pp`;
+            return `<tr class="hover:bg-gray-50 cursor-pointer" data-key="${r.key}">
+                <td class="px-3 py-2 text-sm text-gray-900">
+                    <span class="px-2 py-1 mr-2 rounded-full text-xs ${badgeCls}">${r.changeType}</span>
+                    ${r.name}
+                </td>
+                <td class="px-3 py-2 text-sm font-mono ${colorCls} text-right">${liftFmt(r.lift)}</td>
+                <td class="px-3 py-2 text-sm text-right">${fmt(r.baseline)}</td>
+                <td class="px-3 py-2 text-sm text-right">${fmt(r.post)}</td>
+            </tr>`;
+        }).join('');
+        liftTable.innerHTML = `<div class="overflow-auto h-full"><table class="min-w-full">
+            <thead class="bg-gray-50 sticky top-0">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Column</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lift (pp)</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Baseline</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Post</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">${rowsHtml}</tbody>
+          </table></div>`;
+
+        // Click row to filter heatmap to that column (toggle)
+        const tbody = liftTable.querySelector('tbody');
+        if (tbody) {
+            tbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr');
+                if (!tr) return;
+                const key = tr.getAttribute('data-key');
+                const isActive = tr.classList.contains('bg-blue-50');
+                tbody.querySelectorAll('tr').forEach(x => x.classList.remove('bg-blue-50'));
+                let newSeries = apexSeries;
+                if (!isActive) {
+                    tr.classList.add('bg-blue-50');
+                    newSeries = apexSeries.filter((s, idx) => filteredSeries[idx].key === key);
+                }
+                chart.updateSeries(newSeries, true);
+            });
+        }
+    }
+
+    // Build data for throughput trend using existing dailyBytes as base
+    buildThroughputSeries() {
+        const dates = [...new Set(this.data.dailyBytes.map(d => new Date(d.RUN_DATE).toISOString().split('T')[0]))].sort();
+        const rowsPerSec = [];
+        const bytesPerSec = [];
+        const rowsValues = [];
+        const bytesValues = [];
+        dates.forEach(date => {
+            // Synthesize rows/sec loosely proportional to bytes
+            const bytesItem = this.data.dailyBytes.find(x => new Date(x.RUN_DATE).toISOString().split('T')[0] === date);
+            const bytes = bytesItem ? bytesItem.AVG_BYTES_INSERTED : 0;
+            // Create more independent variation for rows vs bytes
+            const baseRows = bytes > 0 ? Math.round(bytes / (1024 * 1024)) : 200;
+            const variation = 0.7 + Math.random() * 0.6; // 0.7 to 1.3 multiplier
+            const rows = Math.max(50, Math.round(baseRows * variation + Math.random() * 100));
+            const rps = rows / 60; // rows per minute, more realistic scale
+            const bps = bytes / 60; // bytes per minute
+            rowsPerSec.push({ x: date, y: parseFloat(rps.toFixed(2)) });
+            bytesPerSec.push({ x: date, y: parseFloat(bps.toFixed(2)) });
+            rowsValues.push(rps);
+            bytesValues.push(bps);
+        });
+
+        // 30-day medians
+        const median = (arr) => {
+            const s = [...arr].sort((a, b) => a - b);
+            const mid = Math.floor(s.length / 2);
+            return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+        };
+        const rowsMed = median(rowsValues);
+        const bytesMed = median(bytesValues);
+        
+        // Debug: Log median values to ensure they're different
+        // Throughput medians calculated
+        
+        const rowsMedian = dates.map(d => ({ x: d, y: parseFloat(rowsMed.toFixed(2)) }));
+        const bytesMedian = dates.map(d => ({ x: d, y: parseFloat(bytesMed.toFixed(2)) }));
+
+        return { dates, rowsPerSec, bytesPerSec, rowsMedian, bytesMedian };
+    }
+
+    renderThroughputTrendChart() {
+        const container = document.querySelector('#throughputTrendChart');
+        if (!container) return;
+        try {
+            const seriesData = this.buildThroughputSeries();
+            const chart = new ApexCharts(container, {
+                series: [
+                    { name: 'Rows/min', type: 'line', data: seriesData.rowsPerSec },
+                    { name: 'Bytes/min', type: 'line', data: seriesData.bytesPerSec },
+                    { name: 'Rows/min Median (30d)', type: 'line', data: seriesData.rowsMedian },
+                    { name: 'Bytes/min Median (30d)', type: 'line', data: seriesData.bytesMedian }
+                ],
+                chart: { type: 'line', height: 320, fontFamily: 'Inter, sans-serif', toolbar: { show: false } },
+                stroke: { width: [3, 3, 1, 1], curve: 'smooth' },
+                colors: ['#56CCF2', '#2F80ED', '#a3d5ff', '#7ec8ff'],
+                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '12px' } } },
+                yaxis: [{
+                    title: { text: 'Rows/min', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+                }, {
+                    opposite: true,
+                    title: { text: 'Bytes/min', style: { color: '#6b7280' } },
+                    labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+                }],
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#374151' } }
+            });
+            chart.render();
+            this.charts.throughputTrend = chart;
+        } catch (e) {
+            console.error('Error rendering throughput trend:', e);
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Unable to render throughput trend</div>';
+        }
+    }
+
+    renderPipelineCharts() {
+        // Bytes Ingested & API Anomalies (Full Width)
+        this.charts.bytesApiChart = new ApexCharts(document.querySelector("#bytesApiChart"), {
+            series: [{
+                name: 'Bytes Ingested (MB)',
+                type: 'area',
+                yAxisIndex: 0,
+                data: this.data.dailyBytes.map(item => ({
+                    x: item.RUN_DATE,
+                    y: parseFloat((item.AVG_BYTES_INSERTED / 1048576).toFixed(2))
+                }))
+            }, {
+                name: 'API Z-Score',
+                type: 'scatter',
+                yAxisIndex: 1,
+                data: this.data.apiZscore.map(item => ({
+                    x: item.RUN_DATE,
+                    y: parseFloat(item.ZSCORE.toFixed(2))
+                }))
+            }],
+            chart: { 
+                height: 320,
+                fontFamily: 'Inter, sans-serif',
+                toolbar: { show: false }
+            },
+            stroke: { 
+                curve: 'smooth',
+                width: [3, 0]
+            },
+            markers: {
+                size: [0, 4],
+                strokeWidth: [0, 1],
+                strokeColors: ['transparent', '#95CBEE'],
+                hover: { size: [0, 6] }
+            },
+            fill: {
+                type: ['gradient', 'solid'],
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.3,
+                    opacityTo: 0.3,
+                }
+            },
+            colors: ['#A62A92', '#95CBEE'],
+            dataLabels: { enabled: false },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            },
+            yaxis: [{
+                title: { text: 'Bytes (MB)', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }, {
+                opposite: true,
+                title: { text: 'Z-Score', style: { color: '#6b7280' } },
+                labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+            }],
+            legend: { 
+                position: 'top',
+                horizontalAlign: 'right',
+                labels: { colors: '#374151' }
+            },
+            annotations: {
+                yaxis: [{
+                    y: 2,
+                    y2: -2,
+                    yAxisIndex: 1,
+                    borderColor: '#10b981',
+                    fillColor: '#d1fae5',
+                    opacity: 0.2,
+                    label: { 
+                        text: 'Normal Range (±2σ)', 
+                        style: { 
+                            color: '#059669', 
+                            background: '#d1fae5',
+                            fontSize: '11px',
+                            fontWeight: 'bold'
+                        },
+                        position: 'right',
+                        offsetX: -20,
+                        offsetY: -10
+                    }
+                }, {
+                    y: 3,
+                    yAxisIndex: 1,
+                    borderColor: '#f59e0b',
+                    strokeDashArray: 3,
+                    label: { 
+                        text: 'Alert Threshold', 
+                        style: { 
+                            color: '#d97706',
+                            fontSize: '11px',
+                            fontWeight: '500',
+                            background: '#fef3c7',
+                            padding: '4px 8px',
+                            borderRadius: '4px'
+                        },
+                        position: 'right',
+                        offsetX: -15,
+                        offsetY: 10
+                    }
+                }, {
+                    y: -3,
+                    yAxisIndex: 1,
+                    borderColor: '#f59e0b',
+                    strokeDashArray: 3
+                }]
+            }
+        });
+        this.charts.bytesApiChart.render();
+
+        // Connector Success Rate (Donut)
+        const successData = this.aggregateConnectorSuccess();
+        this.charts.connectorSuccessChart = new ApexCharts(document.querySelector("#connectorSuccessChart"), {
+            series: [parseFloat(successData.success), parseFloat(successData.failure)],
+            chart: { 
+                type: 'donut', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            labels: ['Success', 'Failure'],
+            colors: ['#95CBEE', '#A62A92'],
+            plotOptions: {
+                pie: {
+                    donut: {
+                        size: '65%',
+                        labels: {
+                            show: true,
+                            total: {
+                                show: true,
+                                label: 'Success Rate',
+                                formatter: () => `${successData.success}%`
+                            }
+                        }
+                    }
+                }
+            },
+            dataLabels: {
+                enabled: true,
+                formatter: (val) => `${val.toFixed(1)}%`
+            },
+            legend: { 
+                position: 'bottom',
+                labels: { colors: '#374151' }
+            }
+        });
+        this.charts.connectorSuccessChart.render();
+
+        // SLA Breaches Heatmap
+        const slaData = this.processSLABreaches();
+        this.charts.slaHeatmapChart = new ApexCharts(document.querySelector("#slaHeatmapChart"), {
+            series: slaData.series,
+            chart: { 
+                type: 'heatmap', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                categories: slaData.dates,
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            },
+            colors: ['#56CCF2'],
+            colorScale: {
+                ranges: [{
+                    from: 0,
+                    to: 0,
+                    color: '#56CCF2',
+                    name: 'No Breaches'
+                }, {
+                    from: 1,
+                    to: 5,
+                    color: '#2F80ED',
+                    name: 'Low'
+                }, {
+                    from: 6,
+                    to: 10,
+                    color: '#1E3A8A',
+                    name: 'High'
+                }]
+            },
+            dataLabels: { enabled: false },
+            grid: { show: false }
+        });
+        this.charts.slaHeatmapChart.render();
+
+        // Data Freshness Table
+        this.renderFreshnessTable();
+
+        // E2E Latency Heatmap
+        this.renderE2ELatencyHeatmap();
+
+        // Wire Stale Datasets card click to toggle inline details
+        const card = document.getElementById('staleDatasetsCard');
+        const popout = document.getElementById('staleDatasetsPopout');
+        const toggleBtn = document.getElementById('staleDetailsToggle');
+        if (card && popout) {
+            // Build details content from mock freshness (>24h)
+            const staleRows = (this.data.dataFreshness || [])
+                .filter(d => (d.HOURS_SINCE_LAST_RUN || 0) > 24)
+                .sort((a, b) => b.HOURS_SINCE_LAST_RUN - a.HOURS_SINCE_LAST_RUN)
+                .slice(0, 10);
+
+            if (!popout.dataset.initialized) {
+                popout.dataset.initialized = '1';
+                popout.innerHTML = staleRows.length === 0
+                    ? '<div class="text-xs text-gray-500">No stale datasets in the period.</div>'
+                    : staleRows.map(row => {
+                        const lastRun = new Date(Date.now() - row.HOURS_SINCE_LAST_RUN * 3600 * 1000).toLocaleString();
+                        return `
+                        <div class="flex items-start gap-3 py-1.5">
+                            <div class="w-1 rounded bg-orange-300 mt-0.5" style="height: 14px;"></div>
+                            <div class="flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-medium text-[12px] text-gray-900">${row.DATASET}</div>
+                                    <div class="font-mono text-[11px] text-gray-700">${row.HOURS_SINCE_LAST_RUN}h</div>
+                                </div>
+                                <div class="text-[10px] text-gray-500">Last run: ${lastRun} • Warehouse: ${row.WAREHOUSE_NAME || '—'}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                // Hover affordance
+                card.addEventListener('mouseenter', () => { card.style.boxShadow = '0 4px 14px rgba(245,158,11,0.15)'; });
+                card.addEventListener('mouseleave', () => { card.style.boxShadow = ''; });
+
+                const toggle = (e) => {
+                    e.stopPropagation();
+                    const isHidden = popout.classList.contains('hidden');
+                    popout.classList.toggle('hidden', !isHidden);
+                    // Auto scroll into view when opening
+                    if (isHidden) {
+                        setTimeout(() => {
+                            popout.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        }, 0);
+                    }
+                };
+                if (toggleBtn) toggleBtn.addEventListener('click', toggle);
+                // Also allow clicking the metric card to toggle
+                card.addEventListener('click', (e) => {
+                    if (e.target && e.target.closest('#staleDetailsToggle')) return;
+                    toggle(e);
+                });
+            }
+        }
+
+		// Top Slowest Connector Runs Table (Pipeline Health tab)
+		this.renderSlowRunsTableModern();
+    }
+
+    renderAdoptionCharts() {
+        // Weekly Active Users Trend (Full Width)
+        this.charts.wauTrendChart = new ApexCharts(document.querySelector("#wauTrendChart"), {
+        series: [{
+            name: 'Weekly Active Users',
+            data: this.data.snowflakeWAU.map(item => ({
+            x: item.ISO_WEEK,
+            y: item.WAU
+            }))
+        }],
+        chart: { 
+            type: 'bar', 
+            height: 320,
+            fontFamily: 'Inter, sans-serif',
+            toolbar: { show: false }
+        },
+
+        // Solid color bars, no outline
+        colors: ['#259EDC'],
+        fill: { type: 'solid', opacity: 1 },
+        stroke: { show: false, width: 0 },
+
+        // (Optional) bar styling
+        plotOptions: {
+            bar: {
+            columnWidth: '55%',
+            borderRadius: 4
+            }
+        },
+
+        dataLabels: { enabled: false },
+        grid: { strokeDashArray: 1, borderColor: '#ffffff' },
+        xaxis: {
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        },
+        yaxis: {
+            title: { text: 'Active Users', style: { color: '#6b7280' } },
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        }
+        });
+        this.charts.wauTrendChart.render();
+
+        // Top 5 Connectors by Rows (Full Width)
+        const topConnectors = this.getTopConnectorsByRows();
+        this.charts.topConnectorsChart = new ApexCharts(document.querySelector("#topConnectorsChart"), {
+        series: topConnectors.series,
+        chart: { 
+            type: 'line', 
+            height: 320,
+            fontFamily: 'Inter, sans-serif',
+            toolbar: { show: false }
+        },
+        stroke: { curve: 'smooth', width: 3 },
+        colors: ['#A62A92', '#259EDC', '#95CBEE', '#F2A44E', '#F2A44E'],
+        dataLabels: { enabled: false },
+        grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+        xaxis: { 
+            categories: topConnectors.dates,
+            labels: { style: { colors: '#6b7280', fontSize: '12px' } }
+        },
+        yaxis: {
+            title: { text: 'Rows Ingested', style: { color: '#6b7280' } },
+            labels: { 
+            style: { colors: '#6b7280', fontSize: '12px' },
+            formatter: (val) => val.toLocaleString()
+            }
+        },
+        legend: { 
+            position: 'top',
+            horizontalAlign: 'right',
+            labels: { colors: '#374151' }
+        },
+        markers: {
+            size: 0           // no markers - lines only
+        }
+        });
+        this.charts.topConnectorsChart.render();
+
+
+        // Credits vs Users Correlation (Scatter)
+        const correlationData = this.processCreditsUsersCorrelation();
+        this.charts.creditsUsersChart = new ApexCharts(document.querySelector("#creditsUsersChart"), {
+            series: [{ name: 'Warehouses', data: correlationData }],
+            chart: { 
+                type: 'scatter', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            xaxis: { 
+                title: { text: 'Weekly Active Users', style: { color: '#259EDC' } },
+                labels: { style: { colors: '#259EDC', fontSize: '12px' } }
+            },
+            yaxis: { 
+                title: { text: 'Credits Consumed', style: { color: '#259EDC' } },
+                labels: { style: { colors: '#259EDC', fontSize: '12px' } }
+            },
+            colors: ['#259EDC'],
+            markers: {
+                size: 8,
+                strokeWidth: 2,
+                strokeColors: '#ffffff',
+                hover: { size: 10 }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' }
+        });
+        this.charts.creditsUsersChart.render();
+
+        // Dataset Cost Distribution (Horizontal Bar)
+        this.charts.datasetCostChart = new ApexCharts(document.querySelector("#datasetCostChart"), {
+            series: [{
+                data: this.data.datasetCreditCost
+                    .sort((a, b) => b.COST_USD - a.COST_USD)
+                    .slice(0, 8)
+                    .map(item => ({
+                        x: item.DATASET_NAME.length > 25 ? 
+                            item.DATASET_NAME.substring(0, 25) + '...' : 
+                            item.DATASET_NAME,
+                        y: item.COST_USD
+                    }))
+            }],
+            chart: { 
+                type: 'bar', 
+                height: 320,
+                fontFamily: 'Inter, sans-serif'
+            },
+            plotOptions: { 
+                bar: { 
+                    horizontal: true,
+                    borderRadius: 4,
+                    dataLabels: { position: 'top' }
+                } 
+            },
+            colors: ['#259EDC'],
+            dataLabels: { 
+                enabled: true,
+                formatter: (val) => `${val.toFixed(3)}`,
+                style: { fontSize: '11px', colors: ['#374151'] }
+            },
+            grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+            xaxis: {
+                title: { text: 'Cost (USD)', style: { color: '#6b7280' } },
+                labels: { 
+                    style: { colors: '#6b7280', fontSize: '12px' },
+                    formatter: (val) => `${val.toFixed(2)}`
+                }
+            },
+            yaxis: {
+                labels: { style: { colors: '#6b7280', fontSize: '11px' } }
+            }
+        });
+        this.charts.datasetCostChart.render();
+
+        // Cost vs Utilization Quadrant Chart
+        this.renderCostUtilQuadrantChart();
+    }
+
+    renderCostUtilQuadrantChart() {
+        const container = document.querySelector('#costUtilQuadrantChart');
+        if (!container) {
+            console.warn('Cost vs Utilization container not found');
+            return;
+        }
+
+        try {
+            // Check if data exists
+            if (!this.data.costVsUtilization || !Array.isArray(this.data.costVsUtilization)) {
+                console.warn('Cost vs Utilization data not available:', this.data.costVsUtilization);
+                container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost vs utilization data available</div>';
+                return;
+            }
+
+            // Cost vs Utilization data loaded
+
+            // Transform data: util_gb = bytes_loaded / 1e9
+            const transformedData = this.data.costVsUtilization.map(item => ({
+                dataset: item.DATASET,
+                cost_usd: item.COST_USD,
+                util_gb: item.BYTES_LOADED / 1e9,
+                runs: item.RUNS,
+                success_pct: item.SUCCESS_PCT
+            })).filter(item => item.cost_usd > 0 && item.util_gb > 0); // Handle nulls/empties
+
+            if (transformedData.length === 0) {
+                container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">No cost vs utilization data available</div>';
+                return;
+            }
+
+            // Calculate medians for quadrant lines
+            const utilValues = transformedData.map(d => d.util_gb).sort((a, b) => a - b);
+            const costValues = transformedData.map(d => d.cost_usd).sort((a, b) => a - b);
+            const x_med = this.calculateMedian(utilValues);
+            const y_med = this.calculateMedian(costValues);
+
+            // Prepare series data with color scaling by success_pct
+            const seriesData = transformedData.map(item => ({
+                x: parseFloat(item.util_gb.toFixed(2)),
+                y: parseFloat(item.cost_usd.toFixed(2)),
+                z: parseInt(item.runs), // bubble size
+                dataset: item.dataset,
+                success_pct: item.success_pct
+            }));
+
+            const chart = new ApexCharts(container, {
+                series: [{
+                    name: 'Datasets',
+                    data: seriesData
+                }],
+                chart: {
+                    type: 'bubble',
+                    height: 320,
+                    fontFamily: 'Inter, sans-serif',
+                    toolbar: { show: false },
+                    zoom: { enabled: true },
+                    events: {
+                        mounted: (chartContext, config) => {
+                            // Add quadrant background colors after chart renders
+                            this.addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues);
+                        },
+                        updated: (chartContext, config) => {
+                            // Re-add backgrounds on updates
+                            this.addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues);
+                        }
+                    }
+                },
+                xaxis: {
+                    title: { text: 'Domo Dataset Utilization (GB)', style: { color: '#6b7280' } },
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' },
+                        formatter: (val) => val?.toFixed(1) || '0'
+                    }
+                },
+                yaxis: {
+                    title: { text: 'Cost (USD)', style: { color: '#6b7280' } },
+                    labels: { 
+                        style: { colors: '#6b7280', fontSize: '12px' },
+                        formatter: (val) => `$${val?.toFixed(2) || '0'}`
+                    }
+                },
+                colors: ['#259EDC'], // Default color, overridden by fillColor
+                dataLabels: { enabled: false },
+                grid: { strokeDashArray: 3, borderColor: '#e5e7eb' },
+                legend: { show: false },
+                annotations: {
+                    xaxis: [{
+                        x: x_med,
+                        borderColor: '#6b7280',
+                        strokeDashArray: 5,
+                        label: { 
+                            text: `Median Util: ${x_med.toFixed(1)}GB`,
+                            style: { 
+                                color: '#374151', 
+                                fontSize: '10px',
+                                background: '#ffffff',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '4px',
+                                padding: '2px 6px'
+                            },
+                            position: 'top',
+                            offsetY: -10
+                        }
+                    }],
+                    yaxis: [{
+                        y: y_med,
+                        borderColor: '#6b7280',
+                        strokeDashArray: 5,
+                        label: { 
+                            text: `Median Cost: $${y_med.toFixed(2)}`,
+                            style: { 
+                                color: '#374151', 
+                                fontSize: '10px',
+                                background: '#ffffff',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '4px',
+                                padding: '2px 6px'
+                            },
+                            position: 'right',
+                            offsetX: 10
+                        }
+                    }],
+                    // Quadrant text labels positioned manually
+                    points: [
+                        // Best Value (bottom right quadrant) - Light Blue
+                        {
+                            x: x_med + (Math.max(...utilValues) - x_med) * 0.5,
+                            y: Math.min(...costValues) + (y_med - Math.min(...costValues)) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Best Value',
+                                style: { 
+                                    background: 'rgba(135, 206, 235, 0.9)', 
+                                    color: '#1e40af', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(135, 206, 235, 1)'
+                                }
+                            }
+                        },
+                        // Optimize & Scale (top right quadrant) - Light Orange
+                        {
+                            x: x_med + (Math.max(...utilValues) - x_med) * 0.5,
+                            y: y_med + (Math.max(...costValues) - y_med) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Optimize & Scale',
+                                style: { 
+                                    background: 'rgba(255, 193, 122, 0.9)', 
+                                    color: '#ea580c', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(255, 193, 122, 1)'
+                                }
+                            }
+                        },
+                        // Monitor (bottom left quadrant) - Light Purple
+                        {
+                            x: Math.min(...utilValues) + (x_med - Math.min(...utilValues)) * 0.5,
+                            y: Math.min(...costValues) + (y_med - Math.min(...costValues)) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Monitor',
+                                style: { 
+                                    background: 'rgba(168, 85, 247, 0.2)', 
+                                    color: '#7c3aed', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(168, 85, 247, 0.5)'
+                                }
+                            }
+                        },
+                        // Rationalize (top left quadrant) - Light Pink
+                        {
+                            x: Math.min(...utilValues) + (x_med - Math.min(...utilValues)) * 0.5,
+                            y: y_med + (Math.max(...costValues) - y_med) * 0.5,
+                            marker: { size: 0 },
+                            label: {
+                                text: 'Rationalize',
+                                style: { 
+                                    background: 'rgba(237, 137, 157, 0.3)', 
+                                    color: '#be185d', 
+                                    fontSize: '12px', 
+                                    fontWeight: 'bold',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(237, 137, 157, 0.6)'
+                                }
+                            }
+                        }
+                    ]
+                },
+                tooltip: {
+                    custom: ({ dataPointIndex }) => {
+                        const data = transformedData[dataPointIndex];
+                        
+                        // Determine quadrant based on data point position relative to medians
+                        let quadrant = '';
+                        let quadrantInfo = {};
+                        
+                        if (data.util_gb >= x_med && data.cost_usd < y_med) {
+                            quadrant = 'Best Value';
+                            quadrantInfo = {
+                                description: 'high util, low cost',
+                                why: 'You move a lot of data for comparatively little spend.',
+                                action: 'Keep schedules; consider modest scale-up if queues appear.',
+                                watch: 'Cost-per-GB and failure rate stay flat or improving.',
+                                color: '#1e40af'
+                            };
+                        } else if (data.util_gb >= x_med && data.cost_usd >= y_med) {
+                            quadrant = 'Optimize & Scale';
+                            quadrantInfo = {
+                                description: 'high util, high cost',
+                                why: 'Heavy, business-critical pipelines that also drive spend.',
+                                action: 'Tune queries, caching, pruning; right-size warehouses; checkpoint long runs.',
+                                watch: 'Cost-per-GB trend should decline after changes.',
+                                color: '#ea580c'
+                            };
+                        } else if (data.util_gb < x_med && data.cost_usd < y_med) {
+                            quadrant = 'Monitor';
+                            quadrantInfo = {
+                                description: 'low util, low cost',
+                                why: 'Light workloads with minimal impact.',
+                                action: 'Keep but reduce frequency or batch; tag as "low priority."',
+                                watch: 'If utilization grows, reassess for optimization or scaling.',
+                                color: '#7c3aed'
+                            };
+                        } else {
+                            quadrant = 'Rationalize';
+                            quadrantInfo = {
+                                description: 'low util, high cost',
+                                why: 'Poor ROI—expensive but little throughput.',
+                                action: 'Consolidate datasets, downsize/auto-suspend warehouses, or deprecate.',
+                                watch: 'Move left/down within 1–2 cycles, or retire.',
+                                color: '#be185d'
+                            };
+                        }
+                        
+                        return `
+                        <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-family: Inter, sans-serif; max-width: 340px;">
+                            <div style="font-weight: 600; color: #111827; margin-bottom: 8px;">${data.dataset}</div>
+                            <div style="font-size: 12px; color: #6b7280; line-height: 1.4; margin-bottom: 10px;">
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Cost:</span> $${data.cost_usd.toFixed(2)}</div>
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Utilization:</span> ${data.util_gb.toFixed(1)} GB</div>
+                                <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Runs:</span> ${data.runs}</div>
+                                <div><span style="color: #374151; font-weight: 500;">Success Rate:</span> <span style="color: ${this.getSuccessColor(data.success_pct)}; font-weight: 600;">${data.success_pct.toFixed(1)}%</span></div>
+                            </div>
+                            <div style="border-top: 1px solid #e5e7eb; padding-top: 8px;">
+                                <div style="font-weight: 600; color: ${quadrantInfo.color}; margin-bottom: 6px; font-size: 13px;">
+                                    ${quadrant} (${quadrantInfo.description})
+                                </div>
+                                <div style="color: #374151; font-size: 11px; margin-bottom: 4px; line-height: 1.3;">
+                                    <strong>Why:</strong> ${quadrantInfo.why}
+                                </div>
+                                <div style="color: #374151; font-size: 11px; margin-bottom: 4px; line-height: 1.3;">
+                                    <strong>Action:</strong> ${quadrantInfo.action}
+                                </div>
+                                <div style="color: #374151; font-size: 11px; line-height: 1.3;">
+                                    <strong>Watch:</strong> ${quadrantInfo.watch}
+                                </div>
+                            </div>
+                        </div>`;
+                    }
+                }
+            });
+
+            chart.render();
+            this.charts.costUtilQuadrantChart = chart;
+
+        } catch (e) {
+            console.error('Error rendering cost vs utilization chart:', e);
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Chart unavailable</div>';
+        }
+    }
+
+    // Helper method to calculate median
+    calculateMedian(values) {
+        if (!values || values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 
+            ? (sorted[mid - 1] + sorted[mid]) / 2 
+            : sorted[mid];
+    }
+
+    // Helper method to add quadrant background colors
+    addQuadrantBackgrounds(chartContext, x_med, y_med, utilValues, costValues) {
+        try {
+            const chartEl = chartContext.el;
+            // Prefer the grid group so transforms match gridlines/annotations exactly
+            const gridGroup = chartEl.querySelector('g.apexcharts-grid');
+            const plotArea = chartEl.querySelector('.apexcharts-inner');
+            const targetGroup = gridGroup || plotArea;
+
+            if (!targetGroup) return;
+
+            // Remove existing quadrant backgrounds
+            const existingBgs = targetGroup.querySelectorAll('.quadrant-bg');
+            existingBgs.forEach(bg => bg.remove());
+
+            // Get chart dimensions and bounds from globals
+            const w = chartContext.w;
+            const gridRect = {
+                x: w.globals.translateX || 0,
+                y: w.globals.translateY || 0,
+                width: w.globals.gridWidth,
+                height: w.globals.gridHeight
+            };
+
+            if (!gridRect.width || !gridRect.height) return;
+
+            // Coordinates relative to the group we are inserting into.
+            // If we draw inside the grid group, do NOT add the inner translate offsets.
+            const isGrid = !!gridGroup;
+            const baseX = isGrid ? 0 : gridRect.x;
+            const baseY = isGrid ? 0 : gridRect.y;
+
+            // Use ApexCharts' computed axis extents to ensure perfect alignment
+            const xMin = w.globals.minX;
+            const xMax = w.globals.maxX;
+            const yMin = w.globals.minY;
+            const yMax = w.globals.maxY;
+
+            // Guard against divide-by-zero
+            if (xMax === xMin || yMax === yMin) return;
+
+            // Calculate relative positions using ApexCharts' domain (no extra padding)
+            const xMedRel = (x_med - xMin) / (xMax - xMin);
+            const yMedRel = (y_med - yMin) / (yMax - yMin);
+
+            // Convert to pixel coordinates (SVG y-axis is inverted)
+            const xMedPx = baseX + (xMedRel * gridRect.width);
+            const yMedPx = baseY + ((1 - yMedRel) * gridRect.height);
+
+            // Define quadrant boundaries using proper grid coordinates
+            const gridLeft = baseX;
+            const gridRight = baseX + gridRect.width;
+            const gridTop = baseY;
+            const gridBottom = baseY + gridRect.height;
+
+            const quadrants = [
+                // Bottom-left: Monitor (Purple) - Low util, Low cost
+                {
+                    x: gridLeft,
+                    y: yMedPx,
+                    width: xMedPx - gridLeft,
+                    height: gridBottom - yMedPx,
+                    color: 'rgba(168, 85, 247, 0.1)'
+                },
+                // Bottom-right: Best Value (Blue) - High util, Low cost
+                {
+                    x: xMedPx,
+                    y: yMedPx,
+                    width: gridRight - xMedPx,
+                    height: gridBottom - yMedPx,
+                    color: 'rgba(135, 206, 235, 0.2)'
+                },
+                // Top-left: Rationalize (Pink) - Low util, High cost
+                {
+                    x: gridLeft,
+                    y: gridTop,
+                    width: xMedPx - gridLeft,
+                    height: yMedPx - gridTop,
+                    color: 'rgba(237, 137, 157, 0.15)'
+                },
+                // Top-right: Optimize & Scale (Orange) - High util, High cost
+                {
+                    x: xMedPx,
+                    y: gridTop,
+                    width: gridRight - xMedPx,
+                    height: yMedPx - gridTop,
+                    color: 'rgba(255, 193, 122, 0.2)'
+                }
+            ];
+
+            // Create SVG rectangles for quadrant backgrounds
+            quadrants.forEach((quad) => {
+                if (quad.width > 0 && quad.height > 0) {
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', quad.x);
+                    rect.setAttribute('y', quad.y);
+                    rect.setAttribute('width', quad.width);
+                    rect.setAttribute('height', quad.height);
+                    rect.setAttribute('fill', quad.color);
+                    rect.setAttribute('class', 'quadrant-bg');
+                    rect.style.pointerEvents = 'none';
+                    
+                    // Insert behind existing grid elements for precise alignment
+                    targetGroup.insertBefore(rect, targetGroup.firstChild);
+                }
+            });
+
+        } catch (error) {
+            console.warn('Could not add quadrant backgrounds:', error);
+        }
+    }
+
+    // Helper method to get color based on success percentage
+    getSuccessColor(successPct) {
+        if (successPct >= 95) return '#059669'; // Green for excellent
+        if (successPct >= 85) return '#0891b2'; // Teal for good
+        if (successPct >= 75) return '#7c3aed'; // Purple for fair
+        return '#dc2626'; // Red for poor
+    }
+
+    // Data processing methods
+    aggregateByServiceType() {
+        const serviceTypes = ['WAREHOUSE_METERING', 'AI_SERVICES', 'SNOWPARK_CONTAINER_SERVICES'];
+        const dates = [...new Set(this.data.costPerCredit.map(item => 
+            new Date(item.USAGE_DATE).toISOString().split('T')[0]
+        ))].sort();
+
+        const series = serviceTypes.map(serviceType => ({
+            name: serviceType,
+            data: dates.map(date => {
+                const dayData = this.data.costPerCredit.filter(item => 
+                    new Date(item.USAGE_DATE).toISOString().split('T')[0] === date && 
+                    item.SERVICE_TYPE === serviceType
+                );
+                return dayData.reduce((sum, item) => sum + item.CREDITS, 0);
+            })
+        }));
+
+        return { series, categories: dates };
+    }
+
+    aggregateWarehouseCosts() {
+        const warehouseTotals = {};
+        this.data.creditsByWarehouse.forEach(item => {
+            if (!warehouseTotals[item.WAREHOUSE_NAME]) {
+                warehouseTotals[item.WAREHOUSE_NAME] = 0;
+            }
+            warehouseTotals[item.WAREHOUSE_NAME] += item.SPEND_USD;
+        });
+
+        return Object.entries(warehouseTotals).map(([name, cost]) => ({
+            x: name,
+            y: Number(cost.toFixed(2)) // numeric for color scale math
+        }));
+    }
+
+    processWarehouseEvents() {
+        const warehouses = [...new Set(this.data.warehouseEvents.map(e => e.WAREHOUSE_NAME))];
+        const eventTypes = ['SUSPEND_WAREHOUSE', 'RESUME_WAREHOUSE', 'RESIZE_WAREHOUSE'];
+        
+        const series = eventTypes.map(eventType => ({
+            name: eventType,
+            data: this.data.warehouseEvents
+                .filter(e => e.EVENT_NAME === eventType)
+                .map(e => ({
+                    x: new Date(e.EVENT_TS).getTime(),
+                    y: warehouses.indexOf(e.WAREHOUSE_NAME)
+                }))
+        }));
+
+        return { series, warehouses };
+    }
+
+    aggregateConnectorSuccess() {
+        const totalRuns = this.data.connectorRuns.length;
+        const successfulRuns = this.data.connectorRuns.filter(run => run.Status === 'SUCCESS').length;
+        
+        return {
+            success: (successfulRuns / totalRuns * 100).toFixed(1),
+            failure: ((totalRuns - successfulRuns) / totalRuns * 100).toFixed(1)
+        };
+    }
+
+    processSLABreaches() {
+        const connectors = [...new Set(this.data.connectorHealth.map(item => item.CONNECTOR))];
+        const dates = [...new Set(this.data.connectorHealth.map(item => 
+            new Date(item.RUN_DATE).toISOString().split('T')[0]
+        ))].sort();
+
+        const series = connectors.map(connector => ({
+            name: connector,
+            data: dates.map(date => {
+                const dayData = this.data.connectorHealth.find(item => 
+                    item.CONNECTOR === connector && 
+                    new Date(item.RUN_DATE).toISOString().split('T')[0] === date
+                );
+                return dayData ? dayData.SLA_BREACHES : 0;
+            })
+        }));
+
+        return { series, dates };
+    }
+
+    processCreditsUsersCorrelation() {
+        const latestWAU = this.data.snowflakeWAU[this.data.snowflakeWAU.length - 1]?.WAU || 100;
+        
+        return this.data.creditsByWarehouse
+            .reduce((acc, item) => {
+                const existing = acc.find(x => x.warehouse === item.WAREHOUSE_NAME);
+                if (existing) {
+                    existing.credits += item.CREDITS;
+                } else {
+                    acc.push({ warehouse: item.WAREHOUSE_NAME, credits: item.CREDITS });
+                }
+                return acc;
+            }, [])
+            .map(item => ({
+                x: latestWAU + (Math.random() - 0.5) * 20,
+                y: item.credits
+            }));
+    }
+
+    getTopConnectorsByRows() {
+        const connectorTotals = {};
+        const dates = [...new Set(this.data.connectorRuns.map(item => 
+            new Date(item['Created At']).toISOString().split('T')[0]
+        ))].sort();
+
+        this.data.connectorRuns.forEach(run => {
+            const connector = run['Data Source Name'];
+            if (!connectorTotals[connector]) {
+                connectorTotals[connector] = {};
+            }
+            const date = new Date(run['Created At']).toISOString().split('T')[0];
+            if (!connectorTotals[connector][date]) {
+                connectorTotals[connector][date] = 0;
+            }
+            connectorTotals[connector][date] += run['Updated Rows'];
+        });
+
+        const topConnectors = Object.entries(connectorTotals)
+            .map(([name, data]) => ({
+                name,
+                total: Object.values(data).reduce((sum, val) => sum + val, 0)
+            }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 5);
+
+        const series = topConnectors.map(connector => ({
+            name: connector.name,
+            data: dates.map(date => connectorTotals[connector.name][date] || 0)
+        }));
+
+        return { series, dates };
+    }
+
+    renderDatasetCostTable() {
+        const tbody = document.getElementById('datasetCostBody');
+        tbody.innerHTML = '';
+        
+        this.data.datasetCreditCost
+            .sort((a, b) => b.COST_USD - a.COST_USD)
+            .slice(0, 10)
+            .forEach((item, index) => {
+                const trend = Math.random() > 0.5 ? 'up' : 'down';
+                const trendColor = trend === 'up' ? 'text-green-600' : 'text-red-600';
+                const trendIcon = trend === 'up' ? '↗' : '↘';
+                const trendValue = `${trend === 'up' ? '+' : '-'}${(Math.random() * 10 + 1).toFixed(1)}%`;
+                
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-colors';
+                row.innerHTML = `
+                    <td class="py-4 px-4">
+                        <div class="flex items-center">
+                            <img class="mr-3" src="https://cdn.brandfetch.io/idvpz8K3OK/w/400/h/400/theme/dark/icon.jpeg?c=1dxbfHSJFAPEGdCLU4o5B" alt="Domo logo" style="width:18px; height:18px; display:block; object-fit:contain;"/>
+                            <span class="font-medium text-gray-900">${item.DATASET_NAME}</span>
+                        </div>
+                    </td>
+                    <td class="py-4 px-4 text-gray-700 font-mono">${item.CREDITS.toFixed(6)}</td>
+                    <td class="py-4 px-4 text-gray-900 font-semibold">${item.COST_USD.toFixed(6)}</td>
+                    <td class="py-4 px-4">
+                        <span class="${trendColor} font-medium text-sm">
+                            ${trendIcon} ${trendValue}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+    }
+
+    renderFreshnessTable() {
+        const tbody = document.getElementById('freshnessBody');
+        tbody.innerHTML = '';
+        
+        (this.data.dataFreshness || []).forEach(item => {
+            const row = document.createElement('tr');
+            const status = item.HOURS_SINCE_LAST_RUN > 24 ? 'error' : 
+                          item.HOURS_SINCE_LAST_RUN > 12 ? 'warning' : 'success';
+            const statusText = item.HOURS_SINCE_LAST_RUN > 24 ? 'Stale' : 
+                             item.HOURS_SINCE_LAST_RUN > 12 ? 'Warning' : 'Fresh';
+            
+            const lastUpdate = new Date(Date.now() - (item.HOURS_SINCE_LAST_RUN * 60 * 60 * 1000));
+            
+            row.className = 'hover:bg-gray-50 transition-colors';
+            row.innerHTML = `
+                <td class="py-4 px-4">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-3 ${
+                            status === 'success' ? 'bg-green-400' : 
+                            status === 'warning' ? 'bg-yellow-400' : 'bg-red-400'
+                        }"></div>
+                        <span class="font-medium text-gray-900">${item.DATASET}</span>
+                    </div>
+                </td>
+                <td class="py-4 px-4 text-gray-700 font-mono">${item.HOURS_SINCE_LAST_RUN}h</td>
+                <td class="py-4 px-4">
+                    <span class="status-${status}">${statusText}</span>
+                </td>
+                <td class="py-4 px-4 text-gray-500 text-sm">${lastUpdate.toLocaleString()}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    // Prepare heatmap buckets and tooltip data from recordFreshness
+    prepareLatencyHeatmapData() {
+        const bucketHours = (h) => {
+            if (h <= 6) return { label: '0-6h', value: 1 };
+            if (h <= 12) return { label: '6-12h', value: 2 };
+            if (h <= 24) return { label: '12-24h', value: 3 };
+            if (h <= 48) return { label: '24-48h', value: 4 };
+            return { label: '48h+', value: 5 };
+        };
+
+        const seriesMap = {};
+        const tooltipMap = {};
+        (this.data.recordFreshness || []).forEach(row => {
+            const ds = row.DATASET;
+            const dateKey = new Date(row.AS_OF_DATE).toISOString().split('T')[0];
+            const bucket = bucketHours(row.HOURS_BEHIND_NOW);
+            if (!seriesMap[ds]) { seriesMap[ds] = []; tooltipMap[ds] = []; }
+            seriesMap[ds].push({ x: dateKey, y: bucket.value });
+            tooltipMap[ds].push({ dataset: ds, date: dateKey, hoursBehind: row.HOURS_BEHIND_NOW, sourceTs: row.MAX_SOURCE_TS, bucket: bucket.label });
+        });
+        const series = Object.keys(seriesMap).map(k => ({ name: k, data: seriesMap[k] }));
+        const tooltipData = Object.keys(tooltipMap).map(k => tooltipMap[k]);
+        return { series, tooltipData };
+    }
+
+    renderE2ELatencyHeatmap() {
+        const container = document.querySelector('#e2eLatencyHeatmap');
+        if (!container) return;
+        try {
+            const heatmapData = this.prepareLatencyHeatmapData();
+            const chart = new ApexCharts(container, {
+                series: heatmapData.series,
+                chart: { type: 'heatmap', height: 320, fontFamily: 'Inter, sans-serif' },
+                colors: ['#56CCF2'],
+                xaxis: { type: 'datetime', labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
+                yaxis: { labels: { style: { colors: '#6b7280', fontSize: '11px' } } },
+                dataLabels: { enabled: false },
+                grid: { borderColor: '#e5e7eb' },
+                tooltip: {
+                    custom: ({ seriesIndex, dataPointIndex }) => {
+                        const d = heatmapData.tooltipData[seriesIndex]?.[dataPointIndex];
+                        if (!d) return '';
+                        return `\
+<div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); font-family: Inter, sans-serif;">\
+  <div style="font-weight: 600; color: #111827; font-size: 14px; margin-bottom: 8px;">${d.dataset}</div>\
+  <div style="font-size: 12px; color: #6b7280; line-height: 1.4;">\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Date:</span> ${new Date(d.date).toLocaleDateString()}</div>\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Hours Behind:</span> <span style="color: ${d.hoursBehind > 24 ? '#dc2626' : d.hoursBehind > 12 ? '#f59e0b' : '#059669'}; font-weight: 600;">${d.hoursBehind}h</span></div>\
+    <div style="margin-bottom: 3px;"><span style="color: #374151; font-weight: 500;">Source TS:</span> ${new Date(d.sourceTs).toLocaleString()}</div>\
+    <div><span style="color: #374151; font-weight: 500;">Bucket:</span> <span style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${d.bucket}</span></div>\
+  </div>\
+</div>`;
+                    }
+                }
+            });
+            chart.render();
+            this.charts.e2eLatencyHeatmap = chart;
+        } catch (e) {
+            console.error('Error rendering E2E heatmap:', e);
+            container.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500">Heatmap unavailable</div>';
+        }
+    }
+
+
+
+    // Query Optimization Methods
+    filterQueries() {
+        const actionFilter = document.getElementById('actionFilter').value;
+        const improvementFilter = parseFloat(document.getElementById('improvementFilter').value);
+        const sortBy = document.getElementById('sortBy').value;
+        const searchQuery = document.getElementById('searchQueries').value.toLowerCase();
+
+        let filtered = [...this.queryRewriteResults];
+
+        // Apply filters
+        if (actionFilter) {
+            filtered = filtered.filter(query => query.ACTION === actionFilter);
+        }
+
+        if (improvementFilter > 0) {
+            filtered = filtered.filter(query => query.PCT_MS >= improvementFilter);
+        }
+
+        if (searchQuery) {
+            filtered = filtered.filter(query => 
+                query.ORIG_SQL.toLowerCase().includes(searchQuery) ||
+                query.REWRITE_SQL.toLowerCase().includes(searchQuery) ||
+                query.QUERY_ID.toLowerCase().includes(searchQuery)
+            );
+        }
+
+        // Apply sorting
+        switch(sortBy) {
+            case 'improvement_desc':
+                filtered.sort((a, b) => b.PCT_MS - a.PCT_MS);
+                break;
+            case 'improvement_asc':
+                filtered.sort((a, b) => a.PCT_MS - b.PCT_MS);
+                break;
+            case 'savings_desc':
+                filtered.sort((a, b) => b.EST_USD_SAVINGS - a.EST_USD_SAVINGS);
+                break;
+            case 'date_desc':
+                filtered.sort((a, b) => new Date(b.RUN_DTS) - new Date(a.RUN_DTS));
+                break;
+        }
+
+        this.filteredQueries = filtered;
+        this.updateResultsInfo();
+        this.renderQueryComparisons();
+    }
+
+    updateResultsInfo() {
+        const resultsCount = document.getElementById('resultsCount');
+        resultsCount.textContent = `Showing ${this.filteredQueries.length} of ${this.filteredQueries.length} query optimizations`;
+    }
+
+    renderQueryComparisons() {
+        const container = document.getElementById('queryComparisonList');
+        container.innerHTML = ''; // Clear existing content
+        
+        // Show all filtered queries (no pagination)
+        this.filteredQueries.forEach(query => {
+            const queryElement = this.createQueryComparisonElement(query);
+            container.appendChild(queryElement);
+        });
+    }
+
+    createQueryComparisonElement(query) {
+        const container = document.createElement('div');
+        container.className = 'query-comparison-container';
+
+        const headerId = `header-${query.QUERY_ID}`;
+        const detailsId = `details-${query.QUERY_ID}`;
+
+        container.innerHTML = `
+            <div class="query-comparison-header" id="${headerId}">
+                <div class="query-summary">
+                    <div class="query-meta">
+                        <div class="query-id">${query.QUERY_ID.substring(0, 12)}...</div>
+                        <div class="query-metrics">
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.PCT_MS.toFixed(1)}%</div>
+                                <div class="metric-label">Performance</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.PCT_BYTES.toFixed(1)}%</div>
+                                <div class="metric-label">Bytes Saved</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value">${query.BASE_MS}ms</div>
+                                <div class="metric-label">Original</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.TEST_MS}ms</div>
+                                <div class="metric-label">Optimized</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value improvement">${query.EST_USD_SAVINGS.toFixed(2)}</div>
+                                <div class="metric-label">Savings</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="action-badge action-${query.ACTION.toLowerCase()}">${query.ACTION}</span>
+                        <svg class="w-5 h-5 expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div class="query-details" id="${detailsId}">
+                <div class="query-comparison-grid">
+                    <div class="query-panel">
+                        <div class="query-panel-header">
+                            <div class="query-panel-title">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                                Original Query
+                            </div>
+                            <div class="query-panel-subtitle">${query.BASE_MS}ms execution</div>
+                        </div>
+                        <div class="code-viewer">${query.ORIG_SQL}</div>
+                    </div>
+                    <div class="query-panel">
+                        <div class="query-panel-header">
+                            <div class="query-panel-title">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                                </svg>
+                                Optimized Query
+                            </div>
+                            <div class="query-panel-subtitle">${query.TEST_MS}ms execution</div>
+                        </div>
+                        <div class="code-editor-container" id="editor-${query.QUERY_ID}"></div>
+                        <div class="query-actions">
+                            <button class="btn btn-primary run-test-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Run Test
+                            </button>
+                            <button class="btn btn-secondary copy-query-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                                Copy Query
+                            </button>
+                            ${query.ACTION === 'ADOPT' ? `
+                            <button class="btn btn-success deploy-btn" data-query-id="${query.QUERY_ID}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Deploy Optimization
+                            </button>
+                            ` : ''}
+                        </div>
+                        <div id="test-results-${query.QUERY_ID}" class="test-results" style="display: none;">
+                            <div class="test-results-header">Test Results</div>
+                            <div class="test-metrics">
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-time-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Execution Time</div>
+                                </div>
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-improvement-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Improvement</div>
+                                </div>
+                                <div class="test-metric">
+                                    <div class="test-metric-value" id="test-status-${query.QUERY_ID}">--</div>
+                                    <div class="test-metric-label">Status</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="performance-comparison">
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.PCT_MS.toFixed(1)}%</div>
+                        <div class="performance-metric-label">Performance Improvement</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.PCT_BYTES.toFixed(1)}%</div>
+                        <div class="performance-metric-label">Bytes Reduction</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${query.TEST_CREDITS_CLOUD.toFixed(3)}</div>
+                        <div class="performance-metric-label">Credits Used</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value improvement">${query.EST_USD_SAVINGS.toFixed(2)}</div>
+                        <div class="performance-metric-label">Estimated Savings</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${query.WAREHOUSE_NAME}</div>
+                        <div class="performance-metric-label">Warehouse</div>
+                    </div>
+                    <div class="performance-metric">
+                        <div class="performance-metric-value">${new Date(query.RUN_DTS).toLocaleDateString()}</div>
+                        <div class="performance-metric-label">Analysis Date</div>
+                    </div>
+                </div>
+
+                ${query.LLM_RATIONALE ? `
+                <div class="llm-rationale">
+                    <div class="llm-rationale-header">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                        <span class="llm-rationale-title">Claude 4 Sonnet Analysis</span>
+                    </div>
+                    <div class="llm-rationale-content">${query.LLM_RATIONALE}</div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Add event listeners
+        const header = container.querySelector(`#${headerId}`);
+        header.addEventListener('click', () => {
+            this.toggleQueryDetails(query.QUERY_ID);
+        });
+
+        return container;
+    }
+
+    toggleQueryDetails(queryId) {
+        const header = document.getElementById(`header-${queryId}`);
+        const details = document.getElementById(`details-${queryId}`);
+        const icon = header.querySelector('.expand-icon');
+
+        if (details.classList.contains('expanded')) {
+            details.classList.remove('expanded');
+            header.classList.remove('expanded');
+            icon.classList.remove('expanded');
+        } else {
+            details.classList.add('expanded');
+            header.classList.add('expanded');
+            icon.classList.add('expanded');
+            
+            // Initialize Monaco editor for this query if not already done
+            this.initializeQueryEditor(queryId);
+            this.setupQueryActions(queryId);
+        }
+    }
+
+    initializeQueryEditor(queryId) {
+        const editorContainer = document.getElementById(`editor-${queryId}`);
+        if (editorContainer.querySelector('.monaco-editor') || editorContainer.querySelector('textarea')) {
+            return; // Already initialized
+        }
+
+        const query = this.queryRewriteResults.find(q => q.QUERY_ID === queryId);
+        if (!query) return;
+
+        const editor = this.createMonacoEditor(editorContainer, query.REWRITE_SQL, false);
+        
+        // Store editor reference
+        if (!this.monacoEditors) this.monacoEditors = {};
+        this.monacoEditors[queryId] = editor;
+    }
+
+    setupQueryActions(queryId) {
+        const runTestBtn = document.querySelector(`[data-query-id="${queryId}"].run-test-btn`);
+        const copyQueryBtn = document.querySelector(`[data-query-id="${queryId}"].copy-query-btn`);
+        const deployBtn = document.querySelector(`[data-query-id="${queryId}"].deploy-btn`);
+
+        if (runTestBtn && !runTestBtn.hasAttribute('data-listener-added')) {
+            runTestBtn.addEventListener('click', () => this.runQueryTest(queryId));
+            runTestBtn.setAttribute('data-listener-added', 'true');
+        }
+
+        if (copyQueryBtn && !copyQueryBtn.hasAttribute('data-listener-added')) {
+            copyQueryBtn.addEventListener('click', () => this.copyQuery(queryId));
+            copyQueryBtn.setAttribute('data-listener-added', 'true');
+        }
+
+        if (deployBtn && !deployBtn.hasAttribute('data-listener-added')) {
+            deployBtn.addEventListener('click', () => this.deployOptimization(queryId));
+            deployBtn.setAttribute('data-listener-added', 'true');
+        }
+    }
+
+    async runQueryTest(queryId) {
+        const runTestBtn = document.querySelector(`[data-query-id="${queryId}"].run-test-btn`);
+        const testResults = document.getElementById(`test-results-${queryId}`);
+        const testTime = document.getElementById(`test-time-${queryId}`);
+        const testImprovement = document.getElementById(`test-improvement-${queryId}`);
+        const testStatus = document.getElementById(`test-status-${queryId}`);
+
+        // Show loading state
+        runTestBtn.disabled = true;
+        runTestBtn.innerHTML = `
+            <svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Running Test...
+        `;
+        testResults.style.display = 'block';
+        testStatus.innerHTML = '<span class="query-status status-running">Running</span>';
+
+        try {
+            // Get the current query from the editor
+            const editor = this.monacoEditors && this.monacoEditors[queryId];
+            const currentQuery = editor ? editor.getValue() : '';
+            
+            // Simulate query execution with realistic timing
+            await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
+            
+            // Generate realistic test results
+            const originalQuery = this.queryRewriteResults.find(q => q.QUERY_ID === queryId);
+            const variation = 0.8 + Math.random() * 0.4; // 80% to 120% of expected performance
+            const testTimeMs = Math.floor(originalQuery.TEST_MS * variation);
+            const actualImprovement = ((originalQuery.BASE_MS - testTimeMs) / originalQuery.BASE_MS * 100);
+            
+            testTime.textContent = `${testTimeMs}ms`;
+            testImprovement.textContent = `${actualImprovement.toFixed(1)}%`;
+            testImprovement.className = 'test-metric-value ' + (actualImprovement > 0 ? 'improvement' : 'warning');
+            
+            // Determine status based on performance
+            let status = 'success';
+            let statusText = 'Success';
+            if (actualImprovement < 0) {
+                status = 'error';
+                statusText = 'Slower';
+            } else if (actualImprovement < 5) {
+                status = 'warning';
+                statusText = 'Marginal';
+            }
+            
+            testStatus.innerHTML = `<span class="query-status status-${status}">${statusText}</span>`;
+
+        } catch (error) {
+            testStatus.innerHTML = '<span class="query-status status-error">Error</span>';
+            testTime.textContent = 'Failed';
+            testImprovement.textContent = '--';
+        } finally {
+            // Reset button
+            runTestBtn.disabled = false;
+            runTestBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Run Test
+            `;
+        }
+    }
+
+    async copyQuery(queryId) {
+        const copyBtn = document.querySelector(`[data-query-id="${queryId}"].copy-query-btn`);
+        const editor = this.monacoEditors && this.monacoEditors[queryId];
+        const queryText = editor ? editor.getValue() : '';
+
+        try {
+            await navigator.clipboard.writeText(queryText);
+            
+            // Show success feedback
+            const originalText = copyBtn.innerHTML;
+            copyBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                Copied!
+            `;
+            copyBtn.className = 'btn btn-success copy-query-btn';
+            
+            setTimeout(() => {
+                copyBtn.innerHTML = originalText;
+                copyBtn.className = 'btn btn-secondary copy-query-btn';
+            }, 2000);
+            
+        } catch (error) {
+            console.error('Failed to copy query:', error);
+        }
+    }
+
+    async deployOptimization(queryId) {
+        const deployBtn = document.querySelector(`[data-query-id="${queryId}"].deploy-btn`);
+        
+        // Show confirmation dialog (in a real app, this would be a proper modal)
+        if (!confirm('Are you sure you want to deploy this optimization? This will replace the original query in your system.')) {
+            return;
+        }
+
+        // Show loading state
+        deployBtn.disabled = true;
+        deployBtn.innerHTML = `
+            <svg class="w-4 h-4 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Deploying...
+        `;
+
+        try {
+            // Simulate deployment
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Show success state
+            deployBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                Deployed Successfully
+            `;
+            deployBtn.className = 'btn btn-success deploy-btn';
+            
+            // Generate a success alert
+            this.alerts.unshift({
+                type: 'info',
+                title: 'Optimization Deployed',
+                description: `Query optimization for ${queryId.substring(0, 16)}... has been successfully deployed`,
+                timestamp: new Date(),
+                metric: 'optimization'
+            });
+            
+            this.renderAlerts();
+            
+        } catch (error) {
+            deployBtn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+                Deployment Failed
+            `;
+            deployBtn.className = 'btn btn-danger deploy-btn';
+        }
+    }
+
+    // loadMoreQueries method removed - show all queries by default
+
+    generateAlerts() {
+        this.alerts = [];
+
+        // Cost surge detection
+        const dailySpends = this.data.costPerCredit.reduce((acc, item) => {
+            const date = new Date(item.USAGE_DATE).toISOString().split('T')[0];
+            if (!acc[date]) acc[date] = 0;
+            acc[date] += item.SPEND_USD;
+            return acc;
+        }, {});
+
+        const spends = Object.values(dailySpends);
+        const mean = spends.reduce((sum, val) => sum + val, 0) / spends.length;
+        const variance = spends.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / spends.length;
+        const stdDev = Math.sqrt(variance);
+
+        Object.entries(dailySpends).forEach(([date, spend]) => {
+            if (spend > mean + 3 * stdDev) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'Cost Surge Detected',
+                    description: `Daily spend of ${spend.toFixed(2)} exceeds threshold by ${((spend - mean) / stdDev).toFixed(1)}σ`,
+                    timestamp: new Date(date),
+                    metric: 'cost'
+                });
+            }
+        });
+
+        // Idle waste detection
+        this.data.idleActiveRatio.forEach(warehouse => {
+            if (warehouse.QUEUED_PCT > 0.7) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'High Queue Time',
+                    description: `${warehouse.WAREHOUSE_NAME} has ${(warehouse.QUEUED_PCT * 100).toFixed(1)}% queued time`,
+                    timestamp: new Date(),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Query performance alerts
+        const p95Values = this.data.queryPerformance.map(item => item.P95_EXEC_SEC);
+        const p95Median = p95Values.sort((a, b) => a - b)[Math.floor(p95Values.length / 2)];
+        const p95Variance = p95Values.reduce((sum, val) => sum + Math.pow(val - p95Median, 2), 0) / p95Values.length;
+        const p95StdDev = Math.sqrt(p95Variance);
+
+        this.data.queryPerformance.forEach(item => {
+            if (item.P95_EXEC_SEC > p95Median + 2 * p95StdDev) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'Slow Query Spike',
+                    description: `P95 execution time of ${item.P95_EXEC_SEC.toFixed(2)}s exceeds normal range`,
+                    timestamp: new Date(item.USAGE_DATE),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Query failure spikes
+        this.data.queryFailureRate.forEach(item => {
+            if (item.FAILURE_RATE > 0.05) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'High Query Failure Rate',
+                    description: `Failure rate of ${(item.FAILURE_RATE * 100).toFixed(1)}% exceeds 5% threshold`,
+                    timestamp: new Date(item.USAGE_DATE),
+                    metric: 'performance'
+                });
+            }
+        });
+
+        // Connector SLA breaches
+        this.data.connectorHealth.forEach(item => {
+            if (item.SLA_BREACHES > 0) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'Connector SLA Breach',
+                    description: `${item.CONNECTOR} had ${item.SLA_BREACHES} SLA breaches`,
+                    timestamp: new Date(item.RUN_DATE),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // Stale datasets
+        this.data.dataFreshness.forEach(item => {
+            if (item.HOURS_SINCE_LAST_RUN > 12) {
+                this.alerts.push({
+                    type: 'info',
+                    title: 'Stale Dataset',
+                    description: `${item.DATASET} hasn't been updated for ${item.HOURS_SINCE_LAST_RUN} hours`,
+                    timestamp: new Date(),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // API anomalies
+        this.data.apiZscore.forEach(item => {
+            if (Math.abs(item.ZSCORE) >= 3) {
+                this.alerts.push({
+                    type: 'warning',
+                    title: 'API Call Anomaly',
+                    description: `API calls (${item.API_CALLS}) show unusual pattern (z-score: ${item.ZSCORE.toFixed(2)})`,
+                    timestamp: new Date(item.RUN_DATE),
+                    metric: 'pipeline'
+                });
+            }
+        });
+
+        // Query optimization opportunities
+        if (this.queryRewriteResults.length > 0) {
+            const highImpactQueries = this.queryRewriteResults.filter(q => q.PCT_MS > 70 && q.ACTION === 'ADOPT');
+            if (highImpactQueries.length > 0) {
+                this.alerts.push({
+                    type: 'critical',
+                    title: 'High-Impact Optimizations Available',
+                    description: `${highImpactQueries.length} queries show >50% performance improvement potential`,
+                    timestamp: new Date(),
+                    metric: 'optimization'
+                });
+            }
+
+            const totalSavings = this.queryRewriteResults
+                .filter(q => q.ACTION === 'ADOPT')
+                .reduce((sum, q) => sum + q.EST_USD_SAVINGS, 0);
+            
+            if (totalSavings > 100) {
+                this.alerts.push({
+                    type: 'info',
+                    title: 'Significant Cost Savings Available',
+                    description: `Implementing recommended optimizations could save ${totalSavings.toFixed(2)}`,
+                    timestamp: new Date(),
+                    metric: 'optimization'
+                });
+            }
+        }
+
+        // Sort alerts by timestamp (newest first)
+        this.alerts.sort((a, b) => b.timestamp - a.timestamp);
+        
+        this.renderAlerts();
+    }
+
+    renderAlerts() {
+        // Recommendations list - "not in production" styling
+        const alertsList = document.getElementById('alertsList');
+        if (alertsList) {
+        alertsList.innerHTML = '';
+            const visibleAlerts = this.alerts.slice(0, 4);
+            visibleAlerts.forEach(alert => {
+                const el = document.createElement('div');
+                el.className = `alert-recommendation alert-${alert.type} fade-in`;
+                el.innerHTML = `
+                    <div class="text-sm font-medium text-gray-700" style="font-family: 'Inter', sans-serif;">${alert.title}</div>
+                    <div class="text-xs text-gray-500 mt-1" style="font-style: italic;">${alert.description}</div>
+                    <div class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                        DRAFT • ${alert.timestamp.toLocaleString()}
+                    </div>`;
+                alertsList.appendChild(el);
+            });
+            const showMoreButton = document.getElementById('showMoreAlerts');
+            if (showMoreButton) showMoreButton.style.display = this.alerts.length > 4 ? 'block' : 'none';
+        }
+
+        // Live Alerts (preexisting alerts from the original system)
+        const liveAlertsList = document.getElementById('liveAlertsList');
+        if (liveAlertsList) {
+            liveAlertsList.innerHTML = '';
+            
+            // Create diverse preexisting live alerts that were already in the system
+            const preexistingAlerts = [
+                {
+                    title: 'High Query Failure Rate',
+                    description: 'Query failure rate exceeds 5% threshold',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+                },
+                {
+                    title: 'Cost Surge Detection',
+                    description: 'Daily spend exceeded normal variance by 3σ',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) // 5 days ago
+                },
+                {
+                    title: 'Connector SLA Breach',
+                    description: 'Retail Accounts hasn\'t been updated for 24+ hours',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 1 week ago
+                },
+                {
+                    title: 'Data Freshness Alert',
+                    description: 'Customer data is 6+ hours stale',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+                },
+                {
+                    title: 'Warehouse Credit Limit',
+                    description: 'LARGE_WH approaching daily credit limit',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) // 1 day ago
+                },
+                {
+                    title: 'Schema Drift Detected',
+                    description: 'Product catalog table schema changed unexpectedly',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000) // 4 days ago
+                },
+                {
+                    title: 'High Null Rate',
+                    description: 'Customer email field showing 15% null values',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000) // 6 days ago
+                },
+                {
+                    title: 'API Rate Limit Exceeded',
+                    description: 'External API connector hitting rate limits',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) // 8 days ago
+                },
+                {
+                    title: 'Duplicate Key Violations',
+                    description: 'Primary key duplicates found in order_items',
+                    type: 'critical',
+                    timestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // 10 days ago
+                },
+                {
+                    title: 'Slow Query Performance',
+                    description: 'Customer analytics queries taking >30s',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000) // 12 days ago
+                },
+                {
+                    title: 'Data Volume Spike',
+                    description: 'Daily ingestion 300% above baseline',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) // 14 days ago
+                },
+                {
+                    title: 'Connection Timeout',
+                    description: 'Database connector experiencing intermittent timeouts',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000) // 9 days ago
+                },
+                {
+                    title: 'Orphaned Records',
+                    description: 'Found 1.2K orphaned records in sales_detail',
+                    type: 'info',
+                    timestamp: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000) // 11 days ago
+                },
+                {
+                    title: 'Late Data Arrival',
+                    description: 'Financial reports arriving 2+ hours after SLA',
+                    type: 'warning',
+                    timestamp: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000) // 13 days ago
+                }
+            ];
+
+            // Add any created alerts to the live alerts (including new ones)
+            const createdLiveAlerts = this.createdAlerts.map(alert => ({
+                title: alert.name,
+                description: alert.description || 'User-created monitoring alert',
+                type: alert.level,
+                timestamp: new Date(alert.createdAt),
+                isNew: true, // Keep NEW styling for all user-created alerts
+                isUserCreated: true
+            }));
+
+            // Sort created alerts to show new ones first
+            const sortedCreatedAlerts = createdLiveAlerts.sort((a, b) => {
+                // New alerts (implementing) first, then by timestamp (newest first)
+                if (a.isNew && !b.isNew) return -1;
+                if (!a.isNew && b.isNew) return 1;
+                return b.timestamp - a.timestamp;
+            });
+            
+            const allLiveAlerts = [...sortedCreatedAlerts, ...preexistingAlerts].slice(0, 14);
+            
+            allLiveAlerts.forEach(alert => {
+                const el = document.createElement('div');
+                let statusClass = 'alert-live';
+                let statusIndicator = '';
+                let statusText = 'LIVE';
+                
+                // Special styling for user-created alerts (always keep NEW styling)
+                if (alert.isNew) {
+                    statusClass += ' alert-new';
+                    statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>';
+                    statusText = 'LIVE'; // Show LIVE status but keep NEW styling
+                } else {
+                    statusIndicator = '<span class="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>';
+                }
+                
+                el.className = `${statusClass} alert-${alert.type} fade-in`;
+                el.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="text-sm font-semibold text-gray-900">${alert.title}</div>
+                            <div class="text-xs text-gray-600 mt-1">${alert.description}</div>
+                            <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                                ${statusIndicator}
+                                ${statusText} • ${alert.timestamp.toLocaleDateString()}
+                            </div>
+                        </div>
+                        <div class="text-xs font-medium text-gray-500 uppercase">${alert.type}</div>
+                    </div>`;
+                liveAlertsList.appendChild(el);
+            });
+            
+            // Show message if no live alerts (shouldn't happen now)
+            if (allLiveAlerts.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.className = 'text-xs text-gray-500 italic p-2 text-center';
+                emptyEl.textContent = 'No live alerts configured';
+                liveAlertsList.appendChild(emptyEl);
+            }
+        }
+
+        // Created Alerts table with zebra striping
+        const createdTbody = document.getElementById('createdAlertsList');
+        const createdEmpty = document.getElementById('createdAlertsEmpty');
+        if (createdTbody && createdEmpty) {
+            createdTbody.innerHTML = '';
+            if (this.createdAlerts.length === 0) {
+                createdEmpty.classList.remove('hidden');
+            } else {
+                createdEmpty.classList.add('hidden');
+                this.createdAlerts.forEach((a, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.className = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="py-1.5 px-2 font-medium text-gray-900">${a.name}</td>
+                        <td class="py-1.5 px-2 text-gray-700">${a.levelLabel}</td>
+                        <td class="py-1.5 px-2 text-gray-600">${a.datasets.join(', ')}</td>
+                        <td class="py-1.5 px-2 text-gray-700">${a.status === 'implementing' ? '<span class=\"spinner\" aria-live=\"polite\" aria-label=\"Implementing\"></span> Implementing' : a.status === 'active' ? 'Active' : 'Failed'}</td>`;
+                    createdTbody.appendChild(tr);
+                });
+            }
+        }
+
+        // New Alerts activity section removed - new alerts now appear at top of Live Alerts
+    }
+
+    // Simple modal to show mock results and allow Deploy
+    openResultsModal() {
+        const modalId = 'alertResultsModal';
+        let modal = document.getElementById(modalId);
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = modalId;
+            modal.className = 'fixed inset-0 z-50';
+            modal.innerHTML = `
+            <div class="absolute inset-0 bg-black bg-opacity-40"></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+              <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                  <h3 class="text-lg font-semibold text-gray-900">Alert Results</h3>
+                  <button id="closeResults" class="text-gray-400 hover:text-gray-600" aria-label="Close">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                  </button>
+                </div>
+                <div class="p-4 space-y-3">
+                  <div class="text-xs text-gray-500">Showing latest mock matches</div>
+                  <div class="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table class="min-w-full text-[12px]">
+                      <thead class="bg-gray-50 text-gray-600">
+                        <tr><th class="text-left py-1.5 px-2">Dataset</th><th class="text-left py-1.5 px-2">Timestamp</th><th class="text-left py-1.5 px-2">Reason</th></tr>
+                      </thead>
+                      <tbody id="resultsBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="p-4 border-t border-gray-200 flex items-center justify-end gap-2">
+                  <button id="deployAlert" class="btn btn-primary">Deploy</button>
+                </div>
+              </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+        const body = modal.querySelector('#resultsBody');
+        body.innerHTML = '';
+        // mock rows
+        const rows = Array.from({length: 3}).map(() => ({
+            dataset: this.mockDatasets[Math.floor(Math.random()*this.mockDatasets.length)],
+            ts: new Date().toLocaleString(),
+            reason: 'Mock rule matched (example)'
+        }));
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.className = 'odd:bg-white even:bg-gray-50';
+            tr.innerHTML = `<td class="py-1.5 px-2">${r.dataset}</td><td class="py-1.5 px-2">${r.ts}</td><td class="py-1.5 px-2">${r.reason}</td>`;
+            body.appendChild(tr);
+        });
+        modal.classList.remove('hidden');
+        modal.querySelector('#closeResults').onclick = () => modal.classList.add('hidden');
+        modal.querySelector('#deployAlert').onclick = () => {
+            // Promote most recent created alert to the main recommendations list
+            const pending = this.createdAlerts.find(a => a.status !== 'active');
+            if (pending) {
+                pending.status = 'active';
+                // Add to main alerts with proper styling
+                const alertColors = {
+                    'info': 'info',
+                    'warning': 'warning', 
+                    'critical': 'critical'
+                };
+                this.alerts.unshift({
+                    type: alertColors[pending.level] || 'info',
+                    title: pending.name,
+                    description: pending.description || 'Custom alert rule',
+                    timestamp: new Date(),
+                    metric: 'custom'
+                });
+                this.renderAlerts();
+            }
+            modal.classList.add('hidden');
+        };
+    }
+
+    showMoreAlerts() {
+        const alertsList = document.getElementById('alertsList');
+        const hiddenAlerts = this.alerts.slice(5);
+        
+        hiddenAlerts.forEach(alert => {
+            const alertElement = document.createElement('div');
+            alertElement.className = `alert-recommendation alert-${alert.type} fade-in`;
+            alertElement.innerHTML = `
+                <div class="text-sm font-medium text-gray-700" style="font-family: 'Inter', sans-serif;">${alert.title}</div>
+                <div class="text-xs text-gray-500 mt-1" style="font-style: italic;">${alert.description}</div>
+                <div class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                    <span class="inline-block w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                    DRAFT • ${alert.timestamp.toLocaleString()}
+                </div>
+            `;
+            alertsList.appendChild(alertElement);
+        });
+
+        document.getElementById('showMoreAlerts').style.display = 'none';
+    }
+
+    toggleSidebar() {
+        const sidebar = document.getElementById('alertsSidebar');
+        sidebar.classList.toggle('sidebar-collapsed');
+    }
+
+    setupTooltips() {
+        const tooltip = document.getElementById('tooltip');
+        const tooltipContent = tooltip.querySelector('.tooltip-content');
+
+        const positionTooltip = (target) => {
+            const rect = target.getBoundingClientRect();
+            const scrollY = window.scrollY || document.documentElement.scrollTop;
+            const scrollX = window.scrollX || document.documentElement.scrollLeft;
+            // Default place above, aligned left with a small offset
+            let left = rect.left + scrollX;
+            let top = rect.top + scrollY - tooltip.offsetHeight - 12;
+            // Keep within viewport
+            const maxLeft = scrollX + window.innerWidth - tooltip.offsetWidth - 8;
+            const minLeft = scrollX + 8;
+            left = Math.max(minLeft, Math.min(maxLeft, left));
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+        };
+
+        // Attach per-element behavior: hover by default; click when requested
+        document.querySelectorAll('[data-tooltip]').forEach(element => {
+            const trigger = element.getAttribute('data-tooltip-trigger') || 'hover';
+            if (trigger === 'click') {
+                element.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const target = e.currentTarget;
+                    const isVisible = tooltip.classList.contains('visible');
+                    if (isVisible) {
+                        tooltip.classList.remove('visible');
+                        return;
+                    }
+                    const text = target.getAttribute('data-tooltip');
+                    // Light variant and rich content for efficiency score
+                    tooltip.classList.add('light');
+                    tooltipContent.innerHTML = `
+                        <div class="tooltip-title">Efficiency Index (EI)</div>
+                        <div class="tooltip-body">A single number that tells you how efficiently Snowflake compute (credits) is being used to process data. <strong>Lower is better.</strong> An EI of <strong>1.00</strong> means you’re exactly at your chosen baseline; <strong>< 1.00</strong> is more efficient, <strong>> 1.00</strong> is less efficient.</div>
+                    `;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+            } else {
+                element.addEventListener('mouseenter', (e) => {
+                    const target = e.currentTarget;
+                    const text = target.getAttribute('data-tooltip');
+                    tooltip.classList.remove('light');
+                    tooltipContent.textContent = text;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+                element.addEventListener('mouseleave', () => {
+                    tooltip.classList.remove('visible');
+                });
+                element.addEventListener('focus', (e) => {
+                    const target = e.currentTarget;
+                    const text = target.getAttribute('data-tooltip');
+                    tooltipContent.textContent = text;
+                    tooltip.classList.add('visible');
+                    positionTooltip(target);
+                });
+                element.addEventListener('blur', () => {
+                    tooltip.classList.remove('visible');
+                });
+            }
+        });
+
+        // Hide tooltip when clicking elsewhere, scrolling, or resizing
+        document.addEventListener('click', () => tooltip.classList.remove('visible'));
+        window.addEventListener('scroll', () => tooltip.classList.remove('visible'), { passive: true });
+        window.addEventListener('resize', () => tooltip.classList.remove('visible'));
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') tooltip.classList.remove('visible'); });
+    }
+}
+
+// Initialize dashboard when DOM is loaded and libraries are available
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for libraries to load
+    function waitForLibraries() {
+        if (typeof ApexCharts !== 'undefined' && 
+            (typeof domo !== 'undefined' || typeof window.domo !== 'undefined')) {
+            window.dashboard = new SnowDomoDashboard();
+        } else {
+            setTimeout(waitForLibraries, 100);
+        }
+    }
+    
+    waitForLibraries();
+});
