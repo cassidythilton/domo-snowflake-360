@@ -18,20 +18,20 @@
 
 ## Table of Contents
 
-1. [The Problem](#-the-problem)
-2. [Visual Tour](#-visual-tour)
-3. [Architecture](#-architecture)
-4. [Tech Stack](#-tech-stack)
-5. [Dataset Aliases & Manifest](#-dataset-aliases--manifest)
-6. [Getting Started](#-getting-started)
-7. [Key Design Decisions](#-key-design-decisions)
-8. [File Structure](#-file-structure)
-9. [Security & Privacy](#-security--privacy)
-10. [License](#-license)
+1. [The Problem](#the-problem)
+2. [Visual Tour](#visual-tour)
+3. [Architecture](#architecture)
+4. [Tech Stack](#tech-stack)
+5. [Dataset Aliases & Manifest](#dataset-aliases--manifest)
+6. [Getting Started](#getting-started)
+7. [Key Design Decisions](#key-design-decisions)
+8. [File Structure](#file-structure)
+9. [Security & Privacy](#security--privacy)
+10. [License](#license)
 
 ---
 
-## 🎯 The Problem
+## The Problem
 
 Organizations running Snowflake through Domo face a common blind spot: Snowflake's `ACCOUNT_USAGE` views and Domo's connector/DataFlow telemetry live in **separate silos**. Engineers toggle between Snowflake's query history UI and Domo's activity logs to answer straightforward questions:
 
@@ -43,14 +43,14 @@ Snow-Domo 360 eliminates that context-switching by joining both telemetry source
 
 ---
 
-## 📸 Visual Tour
+## Visual Tour
 
 > [!NOTE]
 > Screenshots reflect the default dark-sidebar / light-content theme. A full dark mode is available via the sidebar toggle.
 
 <br>
 
-### 💰 Cost & Credits
+### Cost & Credits
 
 Track Snowflake spend patterns and resource utilization at a glance. KPI cards show **Total Spend**, **Daily Credits Avg**, **Active Warehouses**, and a composite **Efficiency Score**. A dual-axis *Credits and Cost Over Time* chart reveals when cost rises faster than credit consumption. The *Warehouse Cost Distribution* treemap and *Warehouse Utilization* bar chart provide per-warehouse context.
 
@@ -69,7 +69,7 @@ Scrolling down: *Cost per Successful Row* normalizes spend against throughput, *
 
 <br>
 
-### ⚡ Performance & Reliability
+### Performance & Reliability
 
 The **bee-swarm scatter** (Observable Plot + D3) plots every query as a clickable dot — blue for fast, magenta for slow. Click any dot to open an inline *Query Details* panel showing Query ID, execution time, query type, database, warehouse, and SQL text. Below: *P95 Query Duration Trend* with an SLA threshold reference line, and a sortable *Slowest Connector Runs* table.
 
@@ -84,7 +84,7 @@ The **bee-swarm scatter** (Observable Plot + D3) plots every query as a clickabl
 
 <br>
 
-### 🔗 Pipeline Health
+### Pipeline Health
 
 *Bytes Ingested & API Anomalies* overlays daily bytes with an API z-score band — values beyond **±2σ** are shaded as anomalies. The *End-to-End Latency Heatmap* (dataset × day) spots chronic late feeds. *Connector Success Rate* and *SLA Breaches Heatmap* break down reliability. Stale datasets get a clickable **Details** popout.
 
@@ -99,16 +99,16 @@ The **bee-swarm scatter** (Observable Plot + D3) plots every query as a clickabl
 
 <br>
 
-### 📊 Adoption & Utilization
+### Adoption & Utilization
 
 The flagship chart is the **Cost vs. Utilization Quadrant** — an interactive bubble chart classifying each dataset into one of four quadrants. Hover any bubble for AI-generated **Why / Action / Watch** guidance.
 
 | Quadrant | Meaning | Action |
 |----------|---------|--------|
-| 🔴 **Rationalize** | High cost, low utilization | Consolidate, downsize, or deprecate |
-| 🟠 **Optimize & Scale** | High cost, high utilization | Tune schedules, consider auto-suspend |
-| 🟡 **Monitor** | Low cost, low utilization | Watch for growth before investing |
-| 🟢 **Best Value** | Low cost, high utilization | Keep schedules, modest scale-up if queues appear |
+| **Rationalize** | High cost, low utilization | Consolidate, downsize, or deprecate |
+| **Optimize & Scale** | High cost, high utilization | Tune schedules, consider auto-suspend |
+| **Monitor** | Low cost, low utilization | Watch for growth before investing |
+| **Best Value** | Low cost, high utilization | Keep schedules, modest scale-up if queues appear |
 
 ![Adoption & Utilization — Best Value tooltip with Why / Action / Watch guidance](screenshots/adoption-utilization.png)
 
@@ -123,7 +123,7 @@ The flagship chart is the **Cost vs. Utilization Quadrant** — an interactive b
 
 <br>
 
-### 🛡️ Data Quality
+### Data Quality
 
 The **Schema Drift → Null Regression Matrix** heatmap shows null-rate changes across columns from **−7 to +2 days** relative to a schema change event — pinpointing which column adds, removes, or modifications caused regressions. *Lift (pp) vs. Baseline* ranks the largest percentage-point increases. *Coverage Anomalies* plots row-count z-scores, and a *Schema Drift Log* provides a filterable timeline.
 
@@ -139,7 +139,7 @@ The **Schema Drift → Null Regression Matrix** heatmap shows null-rate changes 
 
 <br>
 
-### 🗺️ Data Lineage
+### Data Lineage
 
 An interactive **DAG** (directed acyclic graph) traces data from source to derived datasets. Nodes are color-coded by domain. Filter by domain, toggle Sources Only / Derived Only, search by table name. Zoom, pan, and export.
 
@@ -155,7 +155,7 @@ An interactive **DAG** (directed acyclic graph) traces data from source to deriv
 
 <br>
 
-### 🤖 AI Query Optimization
+### AI Query Optimization
 
 AI-powered query rewrite recommendations with side-by-side comparison. Summary KPIs — **Total Queries Analyzed**, **Avg Improvement**, **Est. Credits Saved**, **Adoption Rate** — followed by a *Performance Distribution* histogram, *Action Breakdown* donut, and *Savings Timeline* area chart.
 
@@ -181,7 +181,7 @@ Toggle **Show Diff** for unified diff highlighting — insertions in green, dele
 
 <br>
 
-### 🔔 Alerting System
+### Alerting System
 
 A persistent right-hand panel available on Performance, Adoption, and Cost views.
 
@@ -195,7 +195,7 @@ A persistent right-hand panel available on Performance, Adoption, and Cost views
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -232,7 +232,7 @@ A persistent right-hand panel available on Performance, Adoption, and Cost views
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Technology | Version |
 |-----------|-----------|---------|
@@ -247,7 +247,7 @@ A persistent right-hand panel available on Performance, Adoption, and Cost views
 
 ---
 
-## 📦 Dataset Aliases & Manifest
+## Dataset Aliases & Manifest
 
 The `manifest.json` declares **25 dataset bindings**. Replace placeholder `dataSetId` values with your actual Domo dataset IDs before deployment.
 
@@ -288,7 +288,7 @@ The `manifest.json` declares **25 dataset bindings**. Replace placeholder `dataS
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -322,15 +322,15 @@ Toggle between **Mock Data** and **Live** mode using the switch in the sidebar f
 
 | Feature | Detail |
 |---------|--------|
-| 📈 Query-time distributions | Exponential with realistic tail behavior |
-| 🌊 Credit usage patterns | Seasonal patterns with weekday/weekend variance |
-| 🔍 Pipeline anomalies | Z-score anomalies injected for monitoring tests |
-| 🔄 Schema drift events | Randomized column changes correlated with null regressions |
-| 💡 Quadrant guidance | Synthetic cost vs. utilization data with AI Why/Action/Watch text |
+| Query-time distributions | Exponential with realistic tail behavior |
+| Credit usage patterns | Seasonal patterns with weekday/weekend variance |
+| Pipeline anomalies | Z-score anomalies injected for monitoring tests |
+| Schema drift events | Randomized column changes correlated with null regressions |
+| Quadrant guidance | Synthetic cost vs. utilization data with AI Why/Action/Watch text |
 
 ---
 
-## 💡 Key Design Decisions
+## Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
@@ -345,7 +345,7 @@ Toggle between **Mock Data** and **Live** mode using the switch in the sidebar f
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 snow-domo-360/
@@ -371,7 +371,7 @@ snow-domo-360/
 
 ---
 
-## 🔒 Security & Privacy
+## Security & Privacy
 
 > [!IMPORTANT]
 > This repository has been audited for public release. No credentials, secrets, or PII are present.
@@ -389,7 +389,7 @@ snow-domo-360/
 
 ---
 
-## 📄 License
+## License
 
 This project is provided as-is for demonstration and reference purposes. See your Domo license agreement for terms governing Custom App deployment.
 
